@@ -1,0 +1,15 @@
+{
+  "name": "@leadflow/crm",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/CrmApp.svelte"
+  },
+  "dependencies": {
+    "@leadflow/ui": "workspace:*",
+    "@leadflow/api-client": "workspace:*",
+    "@tanstack/svelte-query": "^6.0.0",
+    "svelte": "^5.39.0"
+  }
+}

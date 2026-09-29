@@ -1,0 +1,24 @@
+{
+  "name": "@leadflow/admin",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5174",
+    "build": "vite build",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@leadflow/crm": "workspace:*",
+    "@leadflow/ui": "workspace:*",
+    "svelte": "^5.39.0"
+  },
+  "devDependencies": {
+    "vite": "^7.1.7",
+    "@sveltejs/vite-plugin-svelte": "^6.2.0",
+    "@tailwindcss/vite": "^4.1.13",
+    "tailwindcss": "^4.1.13",
+    "typescript": "^5.9.2",
+    "svelte-check": "^4.3.2"
+  }
+}
