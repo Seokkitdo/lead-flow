@@ -1,0 +1,8 @@
+pnpm-lock.yaml
+apps/api/
+node_modules/
+dist/
+playwright-report/
+test-results/
+.git/
+docs/product-spec.md

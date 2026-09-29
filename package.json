@@ -1,0 +1,31 @@
+{
+  "name": "leadflow",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.29.2",
+  "engines": {
+    "node": ">=20.19.0",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter './apps/*' dev",
+    "dev:web": "pnpm --filter @leadflow/web dev",
+    "dev:admin": "pnpm --filter @leadflow/admin dev",
+    "dev:api": "cd apps/api && uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
+    "check": "pnpm -r --if-present check && pnpm check:design",
+    "check:design": "node scripts/check-design.mjs",
+    "build": "pnpm -r --if-present build",
+    "test:api": "cd apps/api && uv run pytest",
+    "test:e2e": "playwright test",
+    "verify": "pnpm format:check && pnpm check && pnpm check:api && pnpm build && pnpm test:api && pnpm test:e2e",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check:api": "cd apps/api && uv run ruff check app tests"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "typescript": "^5.9.0",
+    "prettier": "^3.6.2",
+    "prettier-plugin-svelte": "^3.4.0"
+  }
+}

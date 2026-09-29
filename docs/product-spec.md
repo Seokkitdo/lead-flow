@@ -1,0 +1,246 @@
+# LeadFlow CRM 기획안
+
+작성일: 2026-09-29  
+상태: 초기 기획안 · 프로젝트명 가칭
+
+## 1. 프로젝트 정의
+
+유입된 고객(Lead)을 직원에게 배분하고, 고객별 연락·상담 활동과 현재 진행 상태를 추적하는 업무 관리형 CRM이다. 핵심은 **고객의 현재 상태**와 **지금까지 수행한 업무 이력**을 함께 보존하는 것이다.
+
+```text
+고객 유입 → 관리자 등록 → 담당자 배분 → 직원 연락·상담 → 상태 및 활동 기록 → 재통화·보류·완료 → 관리자 현황 확인
+```
+
+### 프로젝트명 제안
+
+| 이름 | 의미와 인상 | 용도 |
+| --- | --- | --- |
+| **LeadFlow** | 유입부터 배분, 연락, 후속 조치까지의 흐름 | 현재 기획에 가장 직관적인 가칭 |
+| LeadDesk | 직원의 일상 업무 화면을 연상 | 직원 업무 도구를 강조할 때 |
+| LeadHub | 여러 유입 경로의 고객 DB를 모음 | 수집·통합을 강조할 때 |
+| LeadOps | Lead Operations | 내부 운영·B2B 성격을 강조할 때 |
+| FlowDesk | 고객과 업무의 흐름 | 확장성을 고려할 때 |
+| AssignFlow | 고객 배분 | 배분 기능이 중심일 때 |
+| ContactFlow | 고객 접촉과 후속 관리 | 연락 업무가 중심일 때 |
+| LeadTrack | 진행 상태와 이력 추적 | 추적 기능을 강조할 때 |
+| PulseCRM | 고객 현황 파악 | 브랜드형 이름을 원할 때 |
+| Relay | 관리자에서 담당자로 전달 | 짧은 독립 브랜드를 원할 때 |
+
+현재 기획의 가칭은 **LeadFlow**로 둔다. 제품 이름, 도메인 및 상표 사용 가능 여부는 실제 출시 전에 별도로 확인한다.
+
+```text
+서비스명: LeadFlow
+프로젝트: leadflow
+프론트엔드: leadflow-web
+백엔드: leadflow-api
+데이터베이스: leadflow-db
+```
+
+## 2. 사용자와 권한
+
+| 사용자 | 접근 범위 | 주요 작업 |
+| --- | --- | --- |
+| 관리자 (`ADMIN`) | 전체 고객 및 직원 | 고객 등록·수정·검색, 배분·재배분, 직원 관리, 전체 이력·현황 조회 |
+| 직원 (`USER`) | 자신에게 배정된 고객 | 고객 조회, 전화·카카오톡 등 업무 결과 기록, 상태 변경, 메모 및 재통화 일정 입력 |
+
+직원 권한은 화면에서만 제한하지 않고 모든 목록·상세·수정 API와 데이터 조회에서 현재 담당자 기준으로 검사한다. 비활성·퇴사 직원은 로그인과 신규 배분을 제한하고 과거 활동의 작성자 정보는 남긴다.
+
+## 3. 정보 구조 및 화면
+
+### 관리자
+
+1. 로그인
+2. 대시보드: 오늘 유입, 미배분, 진행 중, 재통화 예정, 완료
+3. 고객 DB 목록: 검색, 유입 경로·담당자·배분 상태·업무 상태·유입일 필터
+4. 고객 등록·수정·상세: 기본 정보, 현재 상태, 담당자, 타임라인
+5. DB 배분 관리: 미배분 목록, 단일·일괄·균등 배분, 담당자 변경
+6. 직원 관리 및 직원별 업무 현황
+
+### 직원
+
+1. 내 담당 고객: 신규·진행 중·재통화·완료 요약과 목록
+2. 고객 업무 처리: 연락 결과, 상태, 메모, 필요한 경우 재통화 일시 입력
+3. 고객 상세: 기본 정보와 누적 활동·배분 이력
+
+PC와 모바일 모두 **고객 목록과 고객 상세를 독립된 URL의 페이지**로 제공한다. 고객 등록·수정, 업무 기록·타임라인·담당자 변경, 직원 등록·계정 관리도 직접 접속 가능한 주소를 갖는다. 새로고침 시 현재 페이지를 유지하고, 뒤로 가기로 목록 필터·페이지·스크롤·선택했던 고객 링크의 포커스를 복원한다. 모바일 고객 상세는 전체 폭으로 표시한다. 저장하지 않은 입력이 있으면 이동 전에 확인하고, 저장 중에는 중복 제출과 페이지 이동을 막는다.
+
+## 4. 고객 데이터와 중복 확인
+
+고객 등록의 필수 항목은 **이름, 연락처**다. 선택 항목은 유입 경로(네이버, 카카오, 홈페이지, 폼, 전화, 소개, 기타), 상세 경로, 최초 메모, 유입일이다. 유입일 기본값은 등록일로 두되 수정 가능하게 한다.
+
+전화번호는 검색·중복 확인을 위해 정규화된 값을 보관한다. 동일 번호가 발견되면 기존 고객의 유입일·담당자를 보여주고 **기존 고객 보기 / 그래도 등록** 중 선택하게 한다. 같은 번호를 가족이 공유하거나 재문의할 수 있으므로 일률적인 차단 규칙은 두지 않는다.
+
+고객 목록은 이름·연락처·유입 경로·담당자·현재 상태·배분 상태·유입일·최근 활동을 보여준다. 검색은 이름과 번호를 지원하고, 기간 필터는 기본적으로 유입일을 기준으로 한다. 페이지네이션을 제공한다.
+
+## 5. 현재 상태와 업무 행동 분리
+
+**상태는 고객의 지금 위치를 나타내는 한 값**이고, **활동은 직원이 수행한 행동을 시간순으로 누적한 기록**이다. 예를 들어 카카오톡 발송은 활동이고 상담 완료는 상태다.
+
+### 고객 현재 상태
+
+| 코드 | 화면 표시 |
+| --- | --- |
+| `NEW` | 신규 |
+| `CONTACTING` | 연락 진행 중 |
+| `CALLBACK` | 재통화 예정 |
+| `IN_PROGRESS` | 상담 진행 중 |
+| `HOLD` | 보류 |
+| `REJECTED` | 거절 |
+| `COMPLETED` | 상담 완료 |
+
+### 업무 활동
+
+| 코드 | 화면 표시 |
+| --- | --- |
+| `CALL_ATTEMPT` | 전화 시도 |
+| `CALL_NO_ANSWER` | 전화 부재 |
+| `CALL_CONNECTED` | 전화 연결 |
+| `KAKAO_SENT` | 카카오톡 전달 기록 |
+| `CONSULTATION` | 상담 진행 |
+| `MEMO` | 메모 작성 |
+| `STATUS_CHANGE` | 상태 변경 |
+
+MVP의 `KAKAO_SENT`는 실제 발송 API의 성공을 뜻하지 않는다. 직원이 외부에서 보낸 뒤 **발송했다고 기록한 활동**이다. 실제 발송 및 결과 확인은 연동 단계에서 구분한다.
+
+## 6. 배분과 업무 이력
+
+고객의 **현재 담당자는 한 명**이다. 관리자는 미배분 고객을 한 직원에게 배분하거나 여러 직원을 선택해 라운드 로빈으로 균등 배분한다. 예를 들어 고객 10건과 직원 3명이면 4·3·3건을 배분한다. 현재 직원별 보유량을 고려한 배분은 후속 단계에서 검토한다.
+
+배분·재배분 시에는 이전 담당자, 새 담당자, 수행 관리자, 시각, 사유를 별도 이력으로 남긴다. 상태 변경도 이전·새 상태 및 수행자를 기록한다. 고객 상세의 타임라인에는 전화 부재, 전화 연결, 카카오톡 전달, 메모, 상태 변경, 배분을 최신 순으로 함께 표시한다.
+
+업무 처리 화면에서는 활동 종류와 메모, 변경할 현재 상태를 입력한다. `CALLBACK`을 선택하면 재통화 일시를 함께 입력하도록 한다. 연락처를 누르면 모바일 전화 앱을 열 수 있게 한다. 메모는 고객의 최초 메모를 덮어쓰지 않고 활동 이력으로 추가한다. 잘못 기록한 활동은 무단 삭제하지 않고 수정·취소 사실이 남도록 설계한다.
+
+## 7. 핵심 데이터 모델
+
+```ts
+type UserRole = 'ADMIN' | 'USER';
+type UserStatus = 'ACTIVE' | 'INACTIVE' | 'DEPARTED';
+
+type LeadStatus =
+  | 'NEW'
+  | 'CONTACTING'
+  | 'CALLBACK'
+  | 'IN_PROGRESS'
+  | 'HOLD'
+  | 'REJECTED'
+  | 'COMPLETED';
+
+type LeadSource =
+  | 'NAVER'
+  | 'KAKAO'
+  | 'HOMEPAGE'
+  | 'FORM'
+  | 'PHONE'
+  | 'REFERRAL'
+  | 'ETC';
+
+type LeadActivityType =
+  | 'CALL_ATTEMPT'
+  | 'CALL_NO_ANSWER'
+  | 'CALL_CONNECTED'
+  | 'KAKAO_SENT'
+  | 'CONSULTATION'
+  | 'MEMO'
+  | 'STATUS_CHANGE';
+
+interface Lead {
+  id: string;
+  name: string;
+  phone: string;
+  source?: LeadSource;
+  sourceDetail?: string;
+  initialMemo?: string;
+  currentStatus: LeadStatus;
+  assigneeId?: string;
+  assignedAt?: string;
+  callbackAt?: string;
+  acquiredAt: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+interface LeadActivity {
+  id: string;
+  leadId: string;
+  userId: string;
+  activityType: LeadActivityType;
+  previousStatus?: LeadStatus;
+  newStatus?: LeadStatus;
+  memo?: string;
+  callbackAt?: string;
+  createdAt: string;
+}
+
+interface LeadAssignment {
+  id: string;
+  leadId: string;
+  previousAssigneeId?: string;
+  assigneeId: string;
+  assignedBy: string;
+  reason?: string;
+  createdAt: string;
+}
+```
+
+`users`에는 로그인 ID, 암호 해시, 이름, 연락처, 권한, 재직 상태를 둔다. `leads`는 현재 스냅샷, `lead_activities`는 업무 이력, `lead_assignments`는 담당자 변경 이력이다. 한 번의 상태 변경·업무 기록 또는 배분에 필요한 현재 값 변경과 이력 추가는 같은 트랜잭션으로 처리한다. `callbackAt`의 저장·표시 기준 시간대도 구현 시 명시한다.
+
+## 8. API 초안
+
+| 영역 | 엔드포인트 |
+| --- | --- |
+| 인증 | `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` |
+| 고객 | `GET /api/leads`, `GET /api/leads/:leadId`, `POST /api/leads`, `PATCH /api/leads/:leadId`, `DELETE /api/leads/:leadId` |
+| 배분 | `POST /api/leads/assign`, `POST /api/leads/bulk-assign`, `GET /api/leads/:leadId/assignments` |
+| 활동 | `POST /api/leads/:leadId/activities`, `GET /api/leads/:leadId/activities` |
+| 상태 | `POST /api/leads/:leadId/status` |
+
+상태 변경 요청 예시:
+
+```json
+{
+  "status": "CALLBACK",
+  "memo": "내일 오후 다시 연락 요청",
+  "callbackAt": "2026-09-30T14:00:00+09:00"
+}
+```
+
+직원별 고객 접근 확인, 비활성 계정 제한, 변경 이력 기록은 모든 관련 API에 공통으로 적용한다. 상태 변경과 활동 등록을 별도 API로 유지한다면 한 화면의 저장 동작에서 **중복 이력이나 부분 성공**이 생기지 않도록 요청 경계를 정한다.
+
+## 9. 개발 범위와 순서
+
+### MVP
+
+- 로그인과 관리자·직원 권한
+- 고객 등록·수정·목록·상세·검색·필터
+- 직원 등록·수정·비활성화 및 계정 관리
+- 단일·일괄 배분과 재배분, 직원별 접근 제한
+- 직원의 내 고객 목록과 빠른 업무 처리
+- 상태 변경·활동·메모·배분 이력 및 고객 타임라인
+- 기본 관리자 대시보드, 모바일 대응
+
+### Phase 2
+
+- Excel/CSV 업로드 미리보기, 오류·중복 검토, 다운로드
+- 오늘 재통화 목록, 업무 알림
+- 직원·유입 경로·일자별 통계
+- 직원의 현재 보유량을 고려한 배분
+
+### Phase 3
+
+- CTI로 전화·통화 결과 자동 기록
+- 카카오 비즈니스 발송·결과 연동
+- 광고·폼·홈페이지 유입 자동 등록
+- SLA, 전환 단계 및 관리자 KPI
+
+구현 순서는 **직원·인증 → 고객 CRUD → 배분·접근 제한 → 활동·상태·타임라인 → 검색·필터 → 대시보드·통계 → 외부 연동**으로 잡는다.
+
+## 10. 운영 원칙
+
+- 고객 삭제는 우선 `deletedAt`을 사용하는 소프트 삭제로 설계한다. 실제 보유 기간과 최종 파기 방식은 운영 정책에 맞춰 확정한다.
+- 개인정보 다운로드 권한과 다운로드 이력을 분리하고, 민감한 메모에 접근할 수 있는 역할을 명확히 한다.
+- HTTPS, 서버 측 접근 통제, 로그인 세션 만료, 관리자 변경 이력을 적용한다.
+- `전화 연결`, `카카오톡 전달` 등의 기록이 직원의 수동 입력인지 외부 시스템으로 검증된 결과인지 구별한다.
+
+핵심 모델은 **Lead + Assignment + Activity**다. 고객의 현재 값과 과거 사건을 함께 다룰 수 있어야 관리자 현황과 직원 업무 화면이 같은 데이터를 일관되게 사용한다.
