@@ -1,0 +1,14 @@
+{
+  "name": "@leadflow/ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./theme.css": "./src/theme.css"
+  },
+  "dependencies": {
+    "svelte": "^5.39.0",
+    "tailwindcss": "^4.1.13"
+  }
+}
