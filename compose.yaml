@@ -1,0 +1,71 @@
+name: leadflow
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: leadflow
+      POSTGRES_USER: leadflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U leadflow -d leadflow']
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+  migrate:
+    build: ./apps/api
+    command: [alembic, upgrade, head]
+    environment: &api-environment
+      LEADFLOW_ENVIRONMENT: production
+      LEADFLOW_DATABASE_URL: postgresql+psycopg://leadflow:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/leadflow
+      LEADFLOW_ALLOWED_ORIGINS: https://${WEB_DOMAIN:?Set WEB_DOMAIN},https://${ADMIN_DOMAIN:?Set ADMIN_DOMAIN}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    build: ./apps/api
+    environment: *api-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          CMD,
+          python,
+          -c,
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: infra/frontend.Dockerfile
+    environment:
+      WEB_DOMAIN: ${WEB_DOMAIN:?Set WEB_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?Set ADMIN_DOMAIN}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

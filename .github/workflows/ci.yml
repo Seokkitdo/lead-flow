@@ -1,0 +1,63 @@
+name: verify
+on:
+  pull_request:
+  push:
+    branches: [main, 'feature/**']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: leadflow
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: leadflow
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd 'pg_isready -U leadflow -d leadflow'
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.10.0'
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --locked --project apps/api
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm verify
+      - name: PostgreSQL migration roundtrip
+        working-directory: apps/api
+        env:
+          LEADFLOW_DATABASE_URL: postgresql+psycopg://leadflow:ci-only-password@localhost:5432/leadflow
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+      - name: Build production containers
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          WEB_DOMAIN: crm.example.com
+          ADMIN_DOMAIN: admin.example.com
+        run: |
+          docker compose config --quiet
+          docker compose build
+      - name: Validate gateway configuration
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          WEB_DOMAIN: crm.example.com
+          ADMIN_DOMAIN: admin.example.com
+        run: docker compose run --rm --no-deps gateway caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
