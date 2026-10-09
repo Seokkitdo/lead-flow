@@ -2,7 +2,7 @@
 
 ## 구성
 
-직원 웹과 관리자 웹은 독립 정적 빌드이다. Caddy가 두 도메인의 TLS를 종료하고 `/api/*`를 내부 FastAPI로 전달한다. PostgreSQL과 API 포트는 인터넷에 공개하지 않는다. Caddy만 80/443을 공개한다. 쿠키는 각 호스트에 한정되므로 웹과 어드민에서 각각 로그인한다.
+직원 웹과 관리자 웹은 독립 정적 빌드이다. Caddy가 두 도메인의 TLS를 종료하고 `/api/*`를 내부 FastAPI로 전달한다. PostgreSQL과 API 포트는 인터넷에 공개하지 않는다. Caddy만 80/443을 공개한다. 쿠키는 각 호스트에 한정되므로 서로 다른 도메인에서는 각각 로그인한다. 두 진입점 모두 계정 권한에 따라 관리자 또는 직원 화면을 제공한다.
 
 Docker Compose의 실행 순서는 PostgreSQL healthy → 단일 migration 서비스 완료 → API healthy → gateway이다. 마이그레이션이 실패하면 새 API 실행이 차단된다. 동일 DB에 여러 migration 작업을 동시에 실행하지 않는다.
 
@@ -19,13 +19,20 @@ Linux 서버, Docker Compose v2, 영속 디스크, 서버를 가리키는 서로
 7. 관리자를 명시적으로 생성한다. 암호를 커맨드 인자·로그·Git에 기록하지 않는다.
 
 ```sh
-read -s LEADFLOW_BOOTSTRAP_PASSWORD
-export LEADFLOW_BOOTSTRAP_PASSWORD
-docker compose exec -e LEADFLOW_BOOTSTRAP_PASSWORD api python -m app.cli bootstrap-admin --login-id admin --name 관리자
-unset LEADFLOW_BOOTSTRAP_PASSWORD
+docker compose exec api python -m app.cli bootstrap-admin --login-id admin --name 관리자
 ```
 
 두 HTTPS 주소에서 로그인하고 직원 생성 → 고객 등록 → 배분 → 직원 업무 기록을 확인한다. API health는 `/api/health`이다. 부하와 운영 정책에 맞는 모니터링·알림 대상도 연결한다.
+
+## 계정 복구
+
+직원 비밀번호는 관리자가 직원 관리의 계정 관리 화면에서 새 비밀번호로 재설정한다. 관리자 비밀번호를 분실한 경우 서버 운영자가 아래 명령을 실행하고 12자 이상의 새 비밀번호를 두 번 입력한다. 입력 내용은 화면에 표시되지 않는다.
+
+```sh
+docker compose exec api python -m app.cli reset-admin-password --login-id admin
+```
+
+활성 관리자 계정만 복구할 수 있다. 기존 세션을 모두 종료하고 암호 변경 사실을 감사 이력에 남기며 암호 자체는 기록하지 않는다. 계정 역할·재직 상태와 기존 고객 데이터는 유지한다. 자동화 환경에서는 기존과 같이 `LEADFLOW_BOOTSTRAP_PASSWORD` 환경변수를 전달할 수 있다.
 
 ## 설정 경계
 

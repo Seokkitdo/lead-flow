@@ -6,7 +6,7 @@
 apps/
   web/          Svelte 직원 웹 (5173)
   admin/        Svelte 관리자 웹 (5174)
-  api/          FastAPI · SQLAlchemy · Alembic (8000)
+  api/          FastAPI · SQLAlchemy · Alembic (8001)
 packages/
   ui/           디자인 토큰과 공통 Svelte 컴포넌트
   crm/          공유 CRM 화면과 업무 처리
@@ -24,11 +24,8 @@ pnpm install --frozen-lockfile
 cd apps/api
 uv sync --locked
 uv run alembic upgrade head
-# 아래 명령에서 직접 정한 12자 이상의 암호를 입력합니다.
-read -s LEADFLOW_BOOTSTRAP_PASSWORD
-export LEADFLOW_BOOTSTRAP_PASSWORD
+# 화면 안내에 따라 비밀번호를 두 번 입력합니다 (12자 이상).
 uv run python -m app.cli bootstrap-admin --login-id admin --name 관리자
-unset LEADFLOW_BOOTSTRAP_PASSWORD
 cd ../..
 ```
 
@@ -44,12 +41,12 @@ pnpm dev
 
 ### 접속 주소와 로그인
 
-| 구분   | 개발 PC에서 접속      | 같은 네트워크의 다른 기기에서 접속 | 주요 메뉴                   |
-| ------ | --------------------- | ---------------------------------- | --------------------------- |
-| 관리자 | http://localhost:5174 | http://192.168.1.128:5174          | 고객 DB·고객 배분·직원 관리 |
-| 직원   | http://localhost:5173 | http://192.168.1.128:5173          | 내 담당 고객·상담 활동 기록 |
+| 구분           | 개발 PC에서 접속      | 같은 네트워크의 다른 기기에서 접속 | 주요 메뉴                         |
+| -------------- | --------------------- | ---------------------------------- | --------------------------------- |
+| 공통 로그인    | http://localhost:5173 | http://192.168.1.128:5173          | 계정 권한에 따라 관리자·직원 화면 |
+| 추가 접속 주소 | http://localhost:5174 | http://192.168.1.128:5174          | 공통 로그인과 동일                |
 
-`192.168.1.128`은 현재 개발 PC의 내부 IP입니다. IP가 바뀌면 해당 주소도 변경해야 합니다. 개발 API 문서는 개발 PC에서 http://localhost:8000/api/docs 로 접속합니다.
+`192.168.1.128`은 현재 개발 PC의 내부 IP입니다. IP가 바뀌면 해당 주소도 변경해야 합니다. 개발 API 문서는 개발 PC에서 http://localhost:8001/api/docs 로 접속합니다.
 
 내부 IP로 접속할 때는 `apps/api/.env`의 `LEADFLOW_ALLOWED_ORIGINS`에도 직원·관리자 주소를 등록하고 API를 재시작해야 합니다. 누락하면 로그인 요청이 `403 Untrusted origin`으로 차단됩니다. 현재 개발 환경의 설정 예시는 다음과 같습니다.
 
@@ -57,9 +54,18 @@ pnpm dev
 LEADFLOW_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5174,http://localhost:3500,http://localhost:3501,http://127.0.0.1:5173,http://127.0.0.1:5174,http://192.168.1.128:5173,http://192.168.1.128:5174
 ```
 
-관리자 계정은 초기 설정 명령으로 생성하고 비밀번호를 직접 지정합니다. 실제 계정 비밀번호는 문서나 Git에 기록하지 않습니다.
+관리자 계정은 초기 설정 명령으로 생성하고 비밀번호를 직접 지정합니다. 입력 내용은 화면에 보이지 않습니다. 실제 계정 비밀번호는 문서나 Git에 기록하지 않습니다.
 
-**관리자 계정으로 로그인해도 `5173`에 접속하면 직원 화면이 표시됩니다.** 고객 배분·직원 관리는 관리자 주소인 `5174`에서 진행합니다.
+**공통 로그인 주소는 http://localhost:5173 입니다.** 관리자 계정은 관리자 대시보드로, 직원 계정은 내 담당 고객 목록으로 이동합니다. `5174`에서도 같은 권한 기반 화면을 사용할 수 있습니다. 기존 상세 링크로 로그인하면 접근 가능한 원래 화면으로 돌아갑니다.
+
+관리자 비밀번호를 잊었다면 서버를 관리하는 사람이 아래 명령을 실행하고 새 비밀번호를 두 번 입력합니다. 기존 비밀번호는 조회하지 않으며 기존 세션은 종료됩니다.
+
+```sh
+cd apps/api
+uv run python -m app.cli reset-admin-password --login-id admin
+```
+
+직원 비밀번호는 관리자 화면의 **직원 관리 → 계정 관리 → 새 비밀번호**에서 재설정합니다. 저장 후 직원에게 새 비밀번호를 안전한 경로로 전달합니다.
 
 관리자 화면에서 직원 계정을 만든 뒤 고객을 등록·배분합니다. 직원은 자기 담당 고객만 조회하고 연락 활동·상태·재통화 일시를 기록할 수 있습니다. 기본 로그인 암호는 없습니다. 로컬 DB는 `apps/api/leadflow.db`에 저장되며 Git에서 제외됩니다.
 
@@ -76,6 +82,7 @@ pnpm verify                # 위 품질 게이트를 순서대로 실행
 
 ## 문서
 
+- [역할별 업무 흐름](docs/role-flows.md)
 - [기획안](docs/product-spec.md)
 - [디자인 시스템과 하네스](docs/design-system.md)
 - [구현 범위와 진행 상태](docs/implementation-plan.md)
