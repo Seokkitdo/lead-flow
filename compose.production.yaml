@@ -1,0 +1,71 @@
+name: leadflow
+
+x-api-environment: &api-environment
+  LEADFLOW_ENVIRONMENT: production
+  LEADFLOW_DATABASE_URL: postgresql+psycopg://leadflow:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/leadflow
+  LEADFLOW_ALLOWED_ORIGINS: https://${WEB_DOMAIN:?Set WEB_DOMAIN},https://${ADMIN_DOMAIN:?Set ADMIN_DOMAIN}
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: leadflow
+      POSTGRES_USER: leadflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U leadflow -d leadflow']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    logging: *logging
+
+  migrate:
+    image: ${API_IMAGE:?Set API_IMAGE to a verified image digest}
+    command: [alembic, upgrade, head]
+    environment: *api-environment
+    profiles: [tools]
+    logging: *logging
+
+  api:
+    image: ${API_IMAGE:?Set API_IMAGE to a verified image digest}
+    environment: *api-environment
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)"
+      interval: 10s
+      timeout: 6s
+      retries: 15
+    restart: unless-stopped
+    logging: *logging
+
+  gateway:
+    image: ${GATEWAY_IMAGE:?Set GATEWAY_IMAGE to a verified image digest}
+    environment:
+      WEB_DOMAIN: ${WEB_DOMAIN:?Set WEB_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?Set ADMIN_DOMAIN}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

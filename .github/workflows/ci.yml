@@ -3,11 +3,16 @@ on:
   pull_request:
   push:
     branches: [main, 'feature/**']
+  workflow_dispatch:
+concurrency:
+  group: leadflow-${{ github.ref }}
+  cancel-in-progress: false
 permissions:
   contents: read
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:17-alpine
@@ -42,6 +47,11 @@ jobs:
           uv run alembic check
           uv run alembic downgrade base
           uv run alembic upgrade head
+      - name: PostgreSQL backup and restore
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+          LEADFLOW_DISPOSABLE_DATABASE: 'yes'
+        run: bash scripts/check-postgres-backup.sh
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -61,3 +71,101 @@ jobs:
           WEB_DOMAIN: crm.example.com
           ADMIN_DOMAIN: admin.example.com
         run: docker compose run --rm --no-deps gateway caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Validate deployment scripts and Compose
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          WEB_DOMAIN: crm.example.com
+          ADMIN_DOMAIN: admin.example.com
+          API_IMAGE: ghcr.io/example/leadflow-api:validation
+          GATEWAY_IMAGE: ghcr.io/example/leadflow-gateway:validation
+        run: |
+          bash -n scripts/deploy.sh scripts/check-postgres-backup.sh scripts/setup-production-host.sh
+          docker compose -f compose.production.yaml config --quiet
+
+  publish:
+    needs: verify
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      api_image: ${{ steps.images.outputs.api_image }}
+      gateway_image: ${{ steps.images.outputs.gateway_image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and publish immutable production images
+        id: images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker build --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t "$prefix-api:$GITHUB_SHA" apps/api
+          docker build --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t "$prefix-gateway:$GITHUB_SHA" -f infra/frontend.Dockerfile .
+          docker push "$prefix-api:$GITHUB_SHA"
+          docker push "$prefix-gateway:$GITHUB_SHA"
+          api_image=$(docker image inspect --format '{{index .RepoDigests 0}}' "$prefix-api:$GITHUB_SHA")
+          gateway_image=$(docker image inspect --format '{{index .RepoDigests 0}}' "$prefix-gateway:$GITHUB_SHA")
+          printf 'api_image=%s\ngateway_image=%s\n' "$api_image" "$gateway_image" >> "$GITHUB_OUTPUT"
+      - name: Remove registry credentials
+        if: always()
+        run: docker logout ghcr.io
+
+  deploy:
+    needs: publish
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy the verified revision
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          API_IMAGE: ${{ needs.publish.outputs.api_image }}
+          GATEWAY_IMAGE: ${{ needs.publish.outputs.gateway_image }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" != "$GITHUB_SHA" ]; then
+            echo 'A newer main commit exists; this revision will not be deployed.'
+            exit 0
+          fi
+          : "${DEPLOY_HOST:?Set the production DEPLOY_HOST secret}"
+          : "${DEPLOY_USER:?Set the production DEPLOY_USER secret}"
+          : "${DEPLOY_SSH_KEY:?Set the production DEPLOY_SSH_KEY secret}"
+          : "${DEPLOY_KNOWN_HOSTS:?Set the verified production host key}"
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$API_IMAGE" =~ ^ghcr\.io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]
+          [[ "$GATEWAY_IMAGE" =~ ^ghcr\.io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]
+          key_dir=$(mktemp -d)
+          trap 'rm -rf -- "$key_dir"' EXIT
+          chmod 700 "$key_dir"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$key_dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$key_dir/known_hosts"
+          chmod 600 "$key_dir/key" "$key_dir/known_hosts"
+          unset DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS
+          options=(-i "$key_dir/key" -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$key_dir/known_hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          target="$DEPLOY_USER@$DEPLOY_HOST"
+          release="/opt/leadflow/releases/$GITHUB_SHA"
+          ssh "${options[@]}" "$target" "install -d -m 700 '$release'"
+          scp "${options[@]}" compose.production.yaml scripts/deploy.sh "$target:$release/"
+          printf '%s' "$GH_TOKEN" | ssh "${options[@]}" "$target" \
+            "bash '$release/deploy.sh' '$API_IMAGE' '$GATEWAY_IMAGE' '$GITHUB_ACTOR'"
