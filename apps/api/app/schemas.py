@@ -91,3 +91,19 @@ class SingleAssign(Input):
     lead_id: str
     user_id: str
     reason: str | None = Field(default=None, max_length=1000)
+
+
+class AccountPatch(Input):
+    version: str = Field(min_length=64, max_length=64)
+    current_password: str = Field(min_length=1, max_length=128)
+    phone: str | None = Field(default=None, max_length=30)
+    password: str | None = Field(default=None, min_length=12, max_length=128)
+
+
+class ActivityCorrection(Input):
+    version: int = Field(ge=1)
+    kind: Literal["CORRECTION", "CANCELLATION"]
+    reason: str = Field(min_length=1, max_length=1000)
+    memo: str = Field(default="", max_length=8000)
+    status: Status
+    callback_at: datetime | None = None

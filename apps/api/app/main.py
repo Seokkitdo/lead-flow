@@ -7,6 +7,7 @@ import time
 from collections import defaultdict, deque
 from datetime import UTC, date, datetime, timedelta, timezone
 from threading import Lock
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +19,8 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from .database import Activity, Assignment, Lead, Session, SessionLocal, User, UserAudit, now, settings
 from .schemas import (
+    AccountPatch,
+    ActivityCorrection,
     ActivityCreate,
     BulkAssign,
     LeadCreate,
@@ -116,6 +119,10 @@ def admin(user=Depends(current_user)):
     return user
 
 
+def account_version(user):
+    return digest(json.dumps([user.name, user.phone, user.role, user.status, user.password_hash]))
+
+
 def user_json(user):
     return {
         k: utc(getattr(user, k)) if k == "created_at" else getattr(user, k)
@@ -123,7 +130,53 @@ def user_json(user):
     }
 
 
-def lead_json(lead, db, activity_times=None, assignees=None):
+def assignment_pending():
+    worked = (
+        select(Activity.id)
+        .where(
+            Activity.lead_id == Lead.id,
+            Activity.user_id == Lead.assignee_id,
+            Activity.created_at >= Lead.assigned_at,
+        )
+        .correlate(Lead)
+        .exists()
+    )
+    return Lead.assignee_id.is_not(None) & Lead.assigned_at.is_not(None) & ~worked
+
+
+def lead_summaries(db, lead_ids):
+    latest_memo = (
+        select(Activity.memo)
+        .where(Activity.lead_id == Lead.id, func.trim(Activity.memo) != "")
+        .order_by(Activity.created_at.desc(), Activity.id.desc())
+        .limit(1)
+        .correlate(Lead)
+        .scalar_subquery()
+    )
+    latest_activity = (
+        select(func.max(Activity.created_at))
+        .where(Activity.lead_id == Lead.id)
+        .correlate(Lead)
+        .scalar_subquery()
+    )
+    return {
+        row.id: {
+            "last_activity_at": utc(row.last_activity_at),
+            "latest_memo": row.latest_memo,
+            "assignment_pending": row.assignment_pending,
+        }
+        for row in db.execute(
+            select(
+                Lead.id,
+                latest_activity.label("last_activity_at"),
+                latest_memo.label("latest_memo"),
+                assignment_pending().label("assignment_pending"),
+            ).where(Lead.id.in_(lead_ids))
+        )
+    }
+
+
+def lead_json(lead, db, summaries=None, assignees=None):
     result = {
         k: utc(getattr(lead, k)) if k.endswith("_at") else getattr(lead, k)
         for k in [
@@ -149,12 +202,9 @@ def lead_json(lead, db, activity_times=None, assignees=None):
         else None
     )
     result["assignee_name"] = assignee.name if assignee else None
-    latest = (
-        activity_times.get(lead.id)
-        if activity_times is not None
-        else db.scalar(select(func.max(Activity.created_at)).where(Activity.lead_id == lead.id))
-    )
-    result["last_activity_at"] = utc(latest)
+    if summaries is None:
+        summaries = lead_summaries(db, [lead.id])
+    result.update(summaries[lead.id])
     return result
 
 
@@ -258,7 +308,35 @@ def logout(request: Request, response: Response, db: DBSession = Depends(db_sess
 
 @app.get("/api/auth/me")
 def me(user=Depends(current_user)):
-    return user_json(user)
+    return {**user_json(user), "version": account_version(user)}
+
+
+@app.patch("/api/auth/me")
+def patch_account(
+    body: AccountPatch,
+    response: Response,
+    actor=Depends(current_user),
+    db: DBSession = Depends(db_session),
+):
+    user = db.scalar(
+        select(User).where(User.id == actor.id).with_for_update().execution_options(populate_existing=True)
+    )
+    if user.status != "ACTIVE":
+        raise HTTPException(401, "사용할 수 없는 계정입니다.")
+    if body.version != account_version(user):
+        raise HTTPException(409, "계정 정보가 변경되었습니다. 최신 정보를 불러와 주세요.")
+    if not passwords.verify(body.current_password, user.password_hash):
+        raise HTTPException(400, "현재 비밀번호를 확인해 주세요.")
+    audit = {"phone": {"before": user.phone, "after": body.phone}}
+    user.phone = body.phone
+    if body.password:
+        user.password_hash = passwords.hash(body.password)
+        audit["password_changed"] = True
+        db.execute(delete(Session).where(Session.user_id == user.id))
+        response.delete_cookie(settings.cookie_name, path="/api")
+    db.add(UserAudit(user_id=user.id, actor_id=user.id, changes=json.dumps(audit, ensure_ascii=False)))
+    commit(db)
+    return {**user_json(user), "version": account_version(user)}
 
 
 @app.get("/api/users")
@@ -322,6 +400,8 @@ def leads(
     source: str | None = None,
     assignee_id: str | None = None,
     assignment: str | None = None,
+    work_pending: bool | None = None,
+    callback_window: Literal["today", "overdue", "upcoming", "all"] | None = None,
     acquired_from: date | None = None,
     acquired_to: date | None = None,
     page: int = Query(1, ge=1),
@@ -347,6 +427,23 @@ def leads(
         query = query.where(Lead.assignee_id.is_(None))
     elif assignment == "assigned":
         query = query.where(Lead.assignee_id.is_not(None))
+    if work_pending is not None:
+        query = query.where(assignment_pending() if work_pending else ~assignment_pending())
+    if callback_window:
+        instant = now()
+        start = (
+            instant.astimezone(timezone(timedelta(hours=9)))
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .astimezone(UTC)
+        )
+        end = start + timedelta(days=1)
+        query = query.where(Lead.current_status == "CALLBACK", Lead.callback_at.is_not(None))
+        if callback_window == "today":
+            query = query.where(Lead.callback_at >= start, Lead.callback_at < end)
+        elif callback_window == "overdue":
+            query = query.where(Lead.callback_at < instant)
+        elif callback_window == "upcoming":
+            query = query.where(Lead.callback_at >= end)
     if acquired_from:
         query = query.where(
             Lead.acquired_at
@@ -363,15 +460,11 @@ def leads(
         )
     total = db.scalar(select(func.count()).select_from(query.subquery()))
     items = db.scalars(
-        query.order_by(Lead.acquired_at.desc(), Lead.id).offset((page - 1) * page_size).limit(page_size)
+        query.order_by(Lead.callback_at if callback_window else Lead.acquired_at.desc(), Lead.id)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     ).all()
-    activity_times = dict(
-        db.execute(
-            select(Activity.lead_id, func.max(Activity.created_at))
-            .where(Activity.lead_id.in_([lead.id for lead in items]))
-            .group_by(Activity.lead_id)
-        ).all()
-    )
+    summaries = lead_summaries(db, [lead.id for lead in items])
     assignees = {
         employee.id: employee
         for employee in db.scalars(
@@ -379,7 +472,7 @@ def leads(
         )
     }
     return {
-        "items": [lead_json(x, db, activity_times, assignees) for x in items],
+        "items": [lead_json(x, db, summaries, assignees) for x in items],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -411,7 +504,7 @@ def assign_many(body, actor, db):
         )
     }
     targets = [target_map.get(uid) for uid in user_ids]
-    if any(u is None or u.status != "ACTIVE" for u in targets):
+    if any(u is None or u.status != "ACTIVE" or u.role != "USER" for u in targets):
         raise HTTPException(422, "활성 직원에게만 배분할 수 있습니다.")
     # Stable lock ordering avoids deadlocks for overlapping bulk assignments.
     lead_map = {
@@ -551,6 +644,35 @@ def create_activity(
     lead_id: str, body: ActivityCreate, user=Depends(current_user), db: DBSession = Depends(db_session)
 ):
     return add_activity(lead_id, body, user, db)
+
+
+@app.post("/api/leads/{lead_id}/activities/{activity_id}/corrections", status_code=201)
+def correct_activity(
+    lead_id: str,
+    activity_id: str,
+    body: ActivityCorrection,
+    user=Depends(current_user),
+    db: DBSession = Depends(db_session),
+):
+    get_lead(lead_id, user, db)
+    original = db.get(Activity, activity_id)
+    if not original or original.lead_id != lead_id:
+        raise HTTPException(404, "업무 기록을 찾을 수 없습니다.")
+    if not body.reason.strip() or (body.kind == "CORRECTION" and not body.memo.strip()):
+        raise HTTPException(422, "사유와 정정 내용을 입력해 주세요.")
+    label = "정정" if body.kind == "CORRECTION" else "취소"
+    return add_activity(
+        lead_id,
+        ActivityCreate(
+            version=body.version,
+            activity_type="MEMO",
+            status=body.status,
+            callback_at=body.callback_at,
+            memo=f"[{label} 기록] 원본 활동 ID: {activity_id}\n사유: {body.reason}\n{body.memo}".strip(),
+        ),
+        user,
+        db,
+    )
 
 
 @app.post("/api/leads/{lead_id}/status", status_code=201)

@@ -269,3 +269,267 @@ def test_recent_activity_field(setup):
     stamp = result.json()["timeline"][0]["created_at"]
     assert admin.get("/api/leads").json()["items"][0]["last_activity_at"] == stamp
     assert admin.get(f"/api/leads/{lead['id']}").json()["last_activity_at"] == stamp
+
+
+def test_assignment_pending_and_latest_memo_survive_reassignment(setup):
+    c, ids, _ = setup
+    lead = create(c["admin"])
+    lid = lead["id"]
+    assert lead["latest_memo"] is None
+    assert lead["assignment_pending"] is False
+    assert (
+        c["admin"].post("/api/leads/assign", json={"lead_id": lid, "user_id": ids["admin"]}).status_code
+        == 422
+    )
+    c["admin"].post("/api/leads/assign", json={"lead_id": lid, "user_id": ids["staff"]})
+    assigned = c["staff"].get("/api/leads", params={"work_pending": True}).json()
+    assert assigned["total"] == 1
+    current = assigned["items"][0]
+    assert c["staff"].get(f"/api/leads/{lid}").json()["assignment_pending"] is True
+    worked = c["staff"].post(
+        f"/api/leads/{lid}/activities",
+        json={
+            "version": current["version"],
+            "activity_type": "CALL_CONNECTED",
+            "status": "CALLBACK",
+            "callback_at": "2030-10-01T14:00:00+09:00",
+            "memo": "합성 상담 메모",
+        },
+    )
+    assert worked.status_code == 201
+    assert worked.json()["assignment_pending"] is False
+    assert c["staff"].get("/api/leads", params={"work_pending": True}).json()["total"] == 0
+    # A newer activity without a memo must not hide the last written memo.
+    blank = c["staff"].post(
+        f"/api/leads/{lid}/activities",
+        json={
+            "version": worked.json()["version"],
+            "activity_type": "CALL_ATTEMPT",
+            "memo": "   ",
+        },
+    )
+    assert blank.status_code == 201
+    assert blank.json()["latest_memo"] == "합성 상담 메모"
+    c["admin"].post("/api/leads/assign", json={"lead_id": lid, "user_id": ids["other"]})
+    reassigned = c["other"].get("/api/leads", params={"work_pending": True}).json()["items"][0]
+    assert reassigned["assignment_pending"] is True
+    assert reassigned["current_status"] == "CALLBACK"
+    assert reassigned["callback_at"] == "2030-10-01T05:00:00+00:00"
+    assert reassigned["latest_memo"] == "합성 상담 메모"
+    assert c["staff"].get("/api/leads").json()["total"] == 0
+    assert c["staff"].get(f"/api/leads/{lid}").status_code == 404
+    assert (
+        c["admin"]
+        .post(
+            f"/api/leads/{lid}/activities",
+            json={
+                "version": blank.json()["version"],
+                "activity_type": "MEMO",
+                "memo": "stale",
+            },
+        )
+        .status_code
+        == 409
+    )
+    # Administrator comments do not count as work by the new employee.
+    added = c["admin"].post(
+        f"/api/leads/{lid}/activities",
+        json={
+            "version": reassigned["version"],
+            "activity_type": "MEMO",
+            "memo": "합성 인계 메모",
+        },
+    )
+    assert added.status_code == 201
+    assert added.json()["assignment_pending"] is True
+
+
+def test_admin_recovery_revokes_sessions_and_preserves_audit(setup, monkeypatch):
+    from app import cli
+    from app.database import UserAudit
+
+    c, ids, factory = setup
+    monkeypatch.setattr(cli, "SessionLocal", factory)
+    monkeypatch.setenv("LEADFLOW_BOOTSTRAP_PASSWORD", "synthetic-new-admin-password")
+    monkeypatch.setattr("sys.argv", ["cli", "reset-admin-password", "--login-id", "admin"])
+    cli.main()
+    assert c["admin"].get("/api/auth/me").status_code == 401
+    assert (
+        c["admin"]
+        .post(
+            "/api/auth/login",
+            json={
+                "login_id": "admin",
+                "password": "test-password-123",
+            },
+        )
+        .status_code
+        == 401
+    )
+    assert (
+        c["admin"]
+        .post(
+            "/api/auth/login",
+            json={
+                "login_id": "admin",
+                "password": "synthetic-new-admin-password",
+            },
+        )
+        .status_code
+        == 200
+    )
+    assert c["staff"].get("/api/auth/me").status_code == 200
+    with factory() as db:
+        audit = db.scalar(select(UserAudit).where(UserAudit.user_id == ids["admin"]))
+        assert "password_changed" in audit.changes
+        assert "synthetic-new-admin-password" not in audit.changes
+    for target in ["staff", "missing"]:
+        monkeypatch.setattr("sys.argv", ["cli", "reset-admin-password", "--login-id", target])
+        with pytest.raises(SystemExit):
+            cli.main()
+
+
+def test_bootstrap_interactive_password_confirmation(monkeypatch):
+    import argparse
+
+    from app import cli
+
+    monkeypatch.delenv("LEADFLOW_BOOTSTRAP_PASSWORD", raising=False)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    answers = iter(["synthetic-password", "synthetic-password"])
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: next(answers))
+    assert cli.read_password(argparse.ArgumentParser()) == "synthetic-password"
+    answers = iter(["synthetic-password", "different-password"])
+    with pytest.raises(SystemExit):
+        cli.read_password(argparse.ArgumentParser())
+
+
+def test_account_self_service_conflict_and_session_revocation(setup):
+    from app.database import UserAudit
+
+    clients, ids, factory = setup
+    staff = clients["staff"]
+    version = staff.get("/api/auth/me").json()["version"]
+    data = {"version": version, "current_password": "wrong", "phone": "010-0000-4321"}
+    assert staff.patch("/api/auth/me", json=data).status_code == 400
+    data["current_password"] = "test-password-123"
+    assert staff.patch("/api/auth/me", json={**data, "role": "ADMIN"}).status_code == 422
+    saved = staff.patch("/api/auth/me", json=data)
+    assert saved.status_code == 200
+    assert saved.json()["phone"] == data["phone"]
+    assert staff.patch("/api/auth/me", json=data).status_code == 409
+    another = TestClient(app)
+    assert (
+        another.post(
+            "/api/auth/login", json={"login_id": "staff", "password": "test-password-123"}
+        ).status_code
+        == 200
+    )
+    changed = staff.patch(
+        "/api/auth/me",
+        json={**data, "version": saved.json()["version"], "password": "replacement-password-123"},
+    )
+    assert changed.status_code == 200
+    assert staff.get("/api/auth/me").status_code == 401
+    assert another.get("/api/auth/me").status_code == 401
+    assert (
+        staff.post(
+            "/api/auth/login", json={"login_id": "staff", "password": "replacement-password-123"}
+        ).status_code
+        == 200
+    )
+    with factory() as db:
+        audits = db.scalars(select(UserAudit).where(UserAudit.user_id == ids["staff"])).all()
+        assert len(audits) == 2
+        assert all("replacement-password" not in item.changes for item in audits)
+
+
+def test_callback_windows_use_korean_day_and_current_assignee(setup, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from app import main
+    from app.database import Lead
+
+    clients, ids, factory = setup
+    instant = datetime(2030, 10, 1, 1, tzinfo=UTC)  # 10:00 KST
+    monkeypatch.setattr(main, "now", lambda: instant)
+    # Sessions need to remain valid at the frozen business time.
+    from app.database import Session
+
+    with factory() as db:
+        for session in db.scalars(select(Session)):
+            session.expires_at = instant + timedelta(days=1)
+        db.commit()
+    dates = [
+        "2030-09-30T14:59:00+00:00",
+        "2030-09-30T15:00:00+00:00",
+        "2030-10-01T14:59:00+00:00",
+        "2030-10-01T15:00:00+00:00",
+    ]
+    lead_ids = []
+    for index, value in enumerate(dates):
+        customer = create(clients["admin"], suffix=f"{index:04}")
+        lead_ids.append(customer["id"])
+        with factory() as db:
+            lead = db.get(Lead, customer["id"])
+            lead.current_status = "CALLBACK"
+            lead.callback_at = datetime.fromisoformat(value)
+            lead.assignee_id = ids["staff"]
+            db.commit()
+    for window, expected in [
+        ("today", lead_ids[1:3]),
+        ("overdue", lead_ids[:2]),
+        ("upcoming", lead_ids[3:]),
+        ("all", lead_ids),
+    ]:
+        response = clients["staff"].get(f"/api/leads?callback_window={window}")
+        assert response.status_code == 200
+        assert [lead["id"] for lead in response.json()["items"]] == expected
+        assert clients["other"].get(f"/api/leads?callback_window={window}").json()["total"] == 0
+    assert clients["staff"].get("/api/leads?callback_window=unknown").status_code == 422
+    assert (
+        clients["staff"].get("/api/leads?callback_window=all&page_size=1&page=2").json()["items"][0]["id"]
+        == lead_ids[1]
+    )
+
+
+def test_correction_preserves_original_and_enforces_scope_version(setup):
+    clients, ids, factory = setup
+    admin, staff = clients["admin"], clients["staff"]
+    lead = create(admin)
+    admin.post("/api/leads/assign", json={"lead_id": lead["id"], "user_id": ids["staff"]})
+    latest = staff.get(f"/api/leads/{lead['id']}").json()
+    saved = staff.post(
+        f"/api/leads/{lead['id']}/activities",
+        json={
+            "version": latest["version"],
+            "activity_type": "CALL_CONNECTED",
+            "status": "COMPLETED",
+            "memo": "합성 원본 상담 기록",
+        },
+    ).json()
+    original = next(event for event in saved["timeline"] if event["kind"] == "ACTIVITY")
+    path = f"/api/leads/{lead['id']}/activities/{original['id']}/corrections"
+    payload = {
+        "version": saved["version"],
+        "kind": "CORRECTION",
+        "reason": "잘못 입력",
+        "memo": "합성 정정 내용",
+        "status": "HOLD",
+    }
+    assert clients["other"].post(path, json=payload).status_code == 404
+    assert staff.post(path, json={**payload, "version": 1}).status_code == 409
+    assert staff.post(path, json={**payload, "reason": " "}).status_code == 422
+    corrected = staff.post(path, json=payload)
+    assert corrected.status_code == 201
+    assert corrected.json()["current_status"] == "HOLD"
+    assert original in corrected.json()["timeline"]
+    assert any(original["id"] in (event.get("memo") or "") for event in corrected.json()["timeline"])
+    assert staff.post(path, json=payload).status_code == 409
+    cancelled = staff.post(
+        path, json={**payload, "version": corrected.json()["version"], "kind": "CANCELLATION", "memo": ""}
+    )
+    assert cancelled.status_code == 201
+    assert original in cancelled.json()["timeline"]
+    with factory() as db:
+        assert len(db.scalars(select(Activity).where(Activity.lead_id == lead["id"])).all()) == 3

@@ -5,6 +5,7 @@ export type User = {
   phone?: string;
   role: 'ADMIN' | 'USER';
   status: 'ACTIVE' | 'INACTIVE' | 'DEPARTED';
+  version?: string;
   created_at: string;
 };
 export const statuses = {
@@ -51,6 +52,8 @@ export type Lead = {
   created_at: string;
   updated_at: string;
   last_activity_at: string | null;
+  latest_memo: string | null;
+  assignment_pending: boolean;
   version: number;
   timeline?: Timeline[];
 };

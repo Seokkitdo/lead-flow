@@ -1,28 +1,56 @@
 """Explicit local/demo initialization and secure administrator bootstrap."""
 
 import argparse
+import getpass
+import json
 import os
+import sys
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
-from .database import Assignment, Lead, SessionLocal, User, now
+from .database import Assignment, Lead, Session, SessionLocal, User, UserAudit, now
 from .main import passwords
+
+
+def read_password(parser):
+    password = os.environ.get("LEADFLOW_BOOTSTRAP_PASSWORD", "")
+    if not password:
+        if not sys.stdin.isatty():
+            parser.error("터미널에서 실행하거나 LEADFLOW_BOOTSTRAP_PASSWORD를 설정해 주세요.")
+        password = getpass.getpass("새 비밀번호 (12자 이상, 입력 내용은 표시되지 않습니다): ")
+        confirmation = getpass.getpass("새 비밀번호 확인: ")
+        if password != confirmation:
+            parser.error("비밀번호가 일치하지 않습니다. 다시 실행해 주세요.")
+    if len(password) < 12:
+        parser.error("비밀번호는 12자 이상이어야 합니다. 기본 비밀번호는 없습니다.")
+    return password
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["bootstrap-admin", "seed-demo"])
+    parser.add_argument("command", choices=["bootstrap-admin", "reset-admin-password", "seed-demo"])
     parser.add_argument("--login-id", default="admin")
     parser.add_argument("--name", default="관리자")
     args = parser.parse_args()
-    password = os.environ.get("LEADFLOW_BOOTSTRAP_PASSWORD", "")
-    if len(password) < 12:
-        parser.error(
-            "LEADFLOW_BOOTSTRAP_PASSWORD must contain at least 12 characters; no default password exists"
-        )
+    password = read_password(parser)
     with SessionLocal() as db:
         admin = db.scalar(select(User).where(User.login_id == args.login_id))
+        if args.command == "reset-admin-password":
+            if admin is None or admin.role != "ADMIN" or admin.status != "ACTIVE":
+                parser.error("재직 중인 관리자 계정의 로그인 ID를 확인해 주세요.")
+            admin.password_hash = passwords.hash(password)
+            db.execute(delete(Session).where(Session.user_id == admin.id))
+            db.add(
+                UserAudit(
+                    user_id=admin.id,
+                    actor_id=admin.id,
+                    changes=json.dumps({"password_changed": True, "source": "local_admin_recovery"}),
+                )
+            )
+            db.commit()
+            print(f"관리자 비밀번호 재설정 완료: {args.login_id} (기존 세션 종료)")
+            return
         if admin is None:
             admin = User(
                 login_id=args.login_id,
