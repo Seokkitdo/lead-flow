@@ -70,6 +70,7 @@
         }),
       );
       dirty = false;
+      password = '';
       await onrefresh();
       await onsaved();
     } catch (e) {
@@ -91,7 +92,7 @@
     <div class="section-heading">
       <div>
         <h2>팀 구성원 <span class="count-chip">{users.length}</span></h2>
-        <p>계정과 재직 상태를 관리하고 고객 현황을 확인하세요.</p>
+        <p>직원 계정을 만들고 로그인 ID와 초기 비밀번호를 직원에게 전달하세요.</p>
       </div>
       <a class="btn btn-primary" href="/team/new"><Icon name="plus" size={17} />직원 등록</a>
     </div>
@@ -126,11 +127,17 @@
                         ? '비활성'
                         : '퇴사'}</Badge
                   ></td
-                ><td>{statsLoading || statsError ? '—' : stat?.total || 0}명</td><td
-                  >{statsLoading || statsError ? '—' : stat?.completed || 0}명</td
-                ><td>{statsLoading || statsError ? '—' : stat?.callback || 0}명</td><td
-                  ><a class="btn btn-ghost" id={`member-${user.id}`} href={`/team/${user.id}`}
-                    >계정 관리</a
+                ><td
+                  ><a href={`/team/${user.id}/work`}
+                    >{statsLoading || statsError ? '—' : stat?.total || 0}명</a
+                  ></td
+                ><td>{statsLoading || statsError ? '—' : stat?.completed || 0}명</td><td
+                  >{statsLoading || statsError ? '—' : stat?.callback || 0}명</td
+                ><td
+                  ><a class="btn btn-ghost" href={`/team/${user.id}/work`}>업무 상세</a><a
+                    class="btn btn-ghost"
+                    id={`member-${user.id}`}
+                    href={`/team/${user.id}`}>계정 관리</a
                   ></td
                 ></tr
               >{/each}</tbody
@@ -175,7 +182,7 @@
             label={editing === 'new' ? '초기 비밀번호 *' : '새 비밀번호'}
             hint={editing === 'new'
               ? '12자 이상으로 입력하세요.'
-              : '비워 두면 기존 비밀번호를 유지합니다.'}
+              : '분실 시 새 비밀번호를 입력하세요. 저장하면 기존 로그인 세션이 종료됩니다. 비워 두면 기존 비밀번호를 유지합니다.'}
             ><input
               type="password"
               bind:value={password}

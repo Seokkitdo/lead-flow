@@ -1,11 +1,22 @@
 import { getContext, onMount, setContext, tick } from 'svelte';
 
-export type View = 'overview' | 'leads' | 'assign' | 'team' | 'design' | 'login' | 'missing';
+export type View =
+  | 'overview'
+  | 'leads'
+  | 'assign'
+  | 'team'
+  | 'design'
+  | 'login'
+  | 'missing'
+  | 'callbacks'
+  | 'account'
+  | 'staff';
 export type Route = {
   view: View;
   leadId?: string;
   tab?: string;
   memberId?: string;
+  recordId?: string;
   create?: boolean;
 };
 export function parseRoute(path: string): Route {
@@ -18,9 +29,26 @@ export function parseRoute(path: string): Route {
       team: 'team',
       'design-system': 'design',
       login: 'login',
+      callbacks: 'callbacks',
+      account: 'account',
     };
     return { view: Object.hasOwn(views, parts[0]) ? views[parts[0]] : 'missing' };
   }
+  if (
+    parts[0] === 'team' &&
+    parts.length === 3 &&
+    parts[2] === 'work' &&
+    /^[\da-f-]{36}$/i.test(parts[1])
+  )
+    return { view: 'staff', memberId: parts[1] };
+  if (
+    parts[0] === 'leads' &&
+    parts.length === 4 &&
+    parts[2] === 'records' &&
+    /^[\da-f-]{36}$/i.test(parts[1]) &&
+    /^[\da-f-]{36}$/i.test(parts[3])
+  )
+    return { view: 'leads', leadId: parts[1], tab: 'record', recordId: parts[3] };
   if (parts[0] === 'leads') {
     if (parts[1] === 'new' && parts.length === 2) return { view: 'leads', create: true };
     if (
@@ -44,6 +72,8 @@ export const paths: Record<string, string> = {
   assign: '/assignments',
   team: '/team',
   design: '/design-system',
+  callbacks: '/callbacks',
+  account: '/account',
 };
 const context = Symbol('navigation');
 type Guard = () => 'pending' | 'dirty' | null;

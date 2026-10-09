@@ -82,13 +82,13 @@ test('관리자 등록·중복 확인·배분 → 직원 재통화 기록 → �
   staff.on('pageerror', (error) => errors.push(error.message));
   try {
     await login(staff, STAFF_URL, 'e2e-staff-one', employeePassword);
-    await expect(staff.getByRole('link', { name: '합성고객하나 상세 보기' })).toBeVisible();
-    await expect(staff.getByRole('link', { name: '합성중복고객 상세 보기' })).toHaveCount(0);
+    await expect(staff.getByRole('link', { name: '합성고객하나 업무 처리' })).toBeVisible();
+    await expect(staff.getByRole('link', { name: '합성중복고객 업무 처리' })).toHaveCount(0);
     const visibleLeads = await (await staff.request.get(`${STAFF_URL}/api/leads`)).json();
     expect(visibleLeads.total).toBe(1);
     const leadId = visibleLeads.items[0].id;
     expect((await staff.request.get(`${STAFF_URL}/api/users`)).status()).toBe(403);
-    await staff.getByRole('link', { name: '합성고객하나 상세 보기' }).click();
+    await staff.getByRole('link', { name: '합성고객하나 업무 처리' }).click();
     const detail = staff.getByRole('region', { name: '고객 상세', exact: true });
     await expect(detail.getByRole('heading', { name: '합성고객하나' })).toBeVisible();
     const bounds = await detail.evaluate((element) => {
@@ -113,6 +113,13 @@ test('관리자 등록·중복 확인·배분 → 직원 재통화 기록 → �
     await detail.getByLabel('업무 메모').fill('합성 통화 기록: 다음 상담에서 다시 연락');
     await detail.getByRole('button', { name: '업무 기록 저장' }).click();
     await expect(detail.getByRole('status')).toHaveText('업무 기록을 저장했습니다.');
+    await expect(detail.getByRole('region', { name: '이전 상담 및 배분 이력' })).toContainText(
+      '합성 통화 기록: 다음 상담에서 다시 연락',
+    );
+    await staff.screenshot({
+      path: testInfo.outputPath('staff-mobile-consultation.png'),
+      fullPage: true,
+    });
     await detail.getByRole('link', { name: /전체 타임라인/ }).click();
     await expect(
       detail.getByText('합성 통화 기록: 다음 상담에서 다시 연락', { exact: true }),

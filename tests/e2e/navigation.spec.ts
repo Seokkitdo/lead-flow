@@ -90,8 +90,11 @@ test('메뉴·상세 탭·수정은 URL로 이동하고 새로고침과 뒤로 �
     .getByRole('link', { name: '대시보드' })
     .click();
   await page.getByRole('link', { name: /재통화 예정.*다음 연락/ }).click();
-  await expect(page).toHaveURL(ADMIN + '/leads?status=CALLBACK');
-  await expect(page.getByLabel('업무 상태 필터')).toHaveValue('CALLBACK');
+  await expect(page).toHaveURL(ADMIN + '/callbacks?window=all');
+  await expect(page.getByRole('link', { name: '전체', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
   await page.goto(ADMIN + '/unknown-page');
   await expect(page.getByRole('heading', { name: '페이지를 찾을 수 없습니다' })).toBeVisible();
   expect(errors).toEqual([]);
@@ -204,11 +207,10 @@ test('작은 화면의 상세 페이지와 모션 감소 설정, 권한 없는 �
     animations: 'disabled',
     fullPage: true,
   });
-  // The employee app must not expose admin routes, even to an ADMIN session.
+  // Both entry points choose the workspace from the authenticated role.
   await page.goto('http://127.0.0.1:4173/team');
-  await expect(page.getByRole('heading', { name: '접근할 수 없는 페이지입니다' })).toBeVisible();
-  await page.getByRole('link', { name: '내 담당 고객으로' }).click();
-  await expect(page).toHaveURL('http://127.0.0.1:4173/leads');
+  await expect(page.getByRole('heading', { name: '직원 관리.', exact: true })).toBeVisible();
+  expect((await page.request.get('http://127.0.0.1:4173/api/users')).status()).toBe(200);
 });
 
 test('목록 페이지 번호를 복원하고 고객 수정 충돌은 최신 정보 확인 후에만 저장한다', async ({

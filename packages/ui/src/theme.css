@@ -2075,3 +2075,60 @@ fieldset:disabled {
     flex-wrap: wrap;
   }
 }
+
+/* Consultation entry and its history stay together at every viewport size. */
+.consultation-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+.consultation-layout > * {
+  min-width: 0;
+}
+.consultation-history h3 {
+  margin-bottom: 16px;
+}
+.consultation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+.assignment-note {
+  display: block;
+  margin-top: 8px;
+  color: var(--color-muted);
+}
+.memo-cell {
+  min-width: 180px;
+  max-width: 320px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 900px) {
+  .consultation-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Two rows keep every role's workspace destination reachable on small screens. */
+@media (max-width: 640px) {
+  .sidebar {
+    height: 128px;
+  }
+  .main {
+    padding-bottom: 128px;
+  }
+  .sidebar nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .sidebar nav.admin-navigation {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .sidebar nav :is(button, a) {
+    min-width: 0;
+    padding: 4px;
+  }
+}

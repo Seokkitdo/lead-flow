@@ -17,9 +17,11 @@
   import LeadPanel from './LeadPanel.svelte';
   import LeadEditor from './LeadEditor.svelte';
   import Team from './Team.svelte';
+  import WorkList from './WorkList.svelte';
+  import Account from './Account.svelte';
+  import RecordDetail from './RecordDetail.svelte';
   import DesignSystem from './DesignSystem.svelte';
   import { createNavigation, parseRoute, paths, safeReturn } from './navigation.svelte';
-  let { mode }: { mode: 'admin' | 'staff' } = $props();
   const client = useQueryClient();
   const navigation = createNavigation();
   const route = $derived(parseRoute(navigation.url.pathname));
@@ -48,6 +50,7 @@
     source = query.get('source') || '';
     assignee = query.get('assignee_id') || '';
     assignment = query.get('assignment') || '';
+    workPending = query.get('work_pending') || '';
     acquiredFrom = query.get('acquired_from') || '';
     acquiredTo = query.get('acquired_to') || '';
     const requestedPage = Number(query.get('page'));
@@ -72,7 +75,7 @@
     try {
       session = await api<User>('/auth/me');
       if (view === 'login')
-        navigation.go(safeReturn(navigation.url.searchParams.get('next')), {
+        navigation.go(loginDestination(), {
           replace: true,
           force: true,
         });
@@ -82,6 +85,23 @@
     } finally {
       checking = false;
     }
+  }
+  function loginDestination() {
+    const fallback = session?.role === 'ADMIN' ? '/' : '/leads';
+    const next = safeReturn(navigation.url.searchParams.get('next'), fallback);
+    const target = parseRoute(new URL(next, location.origin).pathname);
+    if (
+      session?.role !== 'ADMIN' &&
+      (next === '/' ||
+        target.view === 'assign' ||
+        target.view === 'team' ||
+        target.view === 'staff' ||
+        target.create ||
+        target.tab === 'edit' ||
+        target.tab === 'assignment')
+    )
+      return fallback;
+    return next;
   }
   function showLogin() {
     const next = navigation.url.pathname + navigation.url.search;
@@ -102,6 +122,7 @@
     source = $state(''),
     assignee = $state(''),
     assignment = $state(''),
+    workPending = $state(''),
     acquiredFrom = $state(''),
     acquiredTo = $state(''),
     page = $state(1);
@@ -110,20 +131,24 @@
     reason = $state(''),
     assigning = $state(false),
     notice = $state('');
-  const isAdmin = $derived(mode === 'admin' && session?.role === 'ADMIN');
+  const isAdmin = $derived(session?.role === 'ADMIN');
   const forbidden = $derived(
     !isAdmin &&
       (view === 'assign' ||
         view === 'team' ||
+        view === 'staff' ||
         route.create ||
         route.tab === 'edit' ||
         route.tab === 'assignment'),
   );
   const titles: Record<string, string> = $derived({
     overview: '오늘의 업무 현황',
-    leads: mode === 'admin' ? '고객 DB' : '내 담당 고객',
+    leads: isAdmin ? '고객 DB' : '내 담당 고객',
     assign: '고객 배분',
     team: route.memberId === 'new' ? '직원 등록' : route.memberId ? '직원 계정 관리' : '직원 관리',
+    staff: '직원 업무 상세',
+    callbacks: '재통화 일정',
+    account: '내 계정 설정',
     design: '디자인 시스템',
     login: '로그인',
     missing: '페이지를 찾을 수 없습니다',
@@ -132,7 +157,7 @@
     if (checking || sessionError || view === 'design') return;
     if (!session && view !== 'login') showLogin();
     else if (session && view === 'login')
-      navigation.go(safeReturn(navigation.url.searchParams.get('next')), {
+      navigation.go(loginDestination(), {
         replace: true,
         force: true,
       });
@@ -166,6 +191,7 @@
         source,
         assignee_id: assignee,
         assignment: view === 'assign' ? 'unassigned' : assignment,
+        work_pending: workPending,
         acquired_from: acquiredFrom,
         acquired_to: acquiredTo,
         page: String(page),
@@ -205,7 +231,7 @@
       client.clear();
       session = await api<User>('/auth/login', body('POST', { login_id: loginId, password }));
       password = '';
-      navigation.go(safeReturn(navigation.url.searchParams.get('next')), {
+      navigation.go(loginDestination(), {
         replace: true,
         force: true,
       });
@@ -243,6 +269,7 @@
         source,
         assignee_id: assignee,
         assignment,
+        work_pending: workPending,
         acquired_from: acquiredFrom,
         acquired_to: acquiredTo,
         page: page > 1 ? String(page) : '',
@@ -264,6 +291,7 @@
     syncFilters(false);
   }
   function metricHref(key: string) {
+    if (key === 'callback') return '/callbacks?window=all';
     const query = new URLSearchParams();
     const filter = { callback: 'CALLBACK', completed: 'COMPLETED', in_progress: 'IN_PROGRESS' }[
       key as 'callback'
@@ -336,7 +364,7 @@
       <div class="login-box">
         <span class="eyebrow">YOUR WORKSPACE</span>
         <h2 data-page-heading tabindex="-1">다시 만나 반가워요</h2>
-        <p class="muted">{mode === 'admin' ? '관리자' : '직원'} 워크스페이스에 로그인하세요.</p>
+        <p class="muted">로그인하면 계정 권한에 맞는 업무 화면으로 이동합니다.</p>
         <form onsubmit={login}>
           <Field label="로그인 ID"
             ><input
@@ -359,7 +387,7 @@
             >{pending ? '로그인 중…' : '로그인'}<Icon name="arrow" size={17} /></Button
           >
         </form>
-        <p class="login-help">계정이 없다면 워크스페이스 관리자에게 문의해 주세요.</p>
+        <p class="login-help">계정 발급이나 비밀번호 재설정은 관리자에게 요청하세요.</p>
         <button class="text-button" onclick={() => navigate('design')}
           >LeadFlow 디자인 시스템 ↗</button
         >
@@ -367,7 +395,7 @@
       <small class="login-footer">LeadFlow CRM · 고객과 업무를 연결합니다</small>
     </section>
   </main>
-{:else if mode === 'admin' && session.role !== 'ADMIN'}
+{:else if isAdmin && session.role !== 'ADMIN'}
   <main class="loading-screen">
     <h1>관리자 전용 워크스페이스입니다</h1>
     <p>직원 웹에서 담당 고객을 확인해 주세요.</p>
@@ -389,8 +417,8 @@
         <span class="online-dot"></span>
       </div>
       <span class="nav-label">WORKSPACE</span>
-      <nav aria-label="주 메뉴">
-        {#each [{ key: 'overview', icon: 'dashboard', label: '대시보드' }, { key: 'leads', icon: 'users', label: isAdmin ? '고객 DB' : '내 담당 고객' }, ...(isAdmin ? [{ key: 'assign', icon: 'assign', label: '고객 배분' }, { key: 'team', icon: 'grid', label: '직원 관리' }] : [])] as item}<a
+      <nav aria-label="주 메뉴" class:admin-navigation={isAdmin}>
+        {#each [{ key: 'overview', icon: 'dashboard', label: '대시보드' }, { key: 'leads', icon: 'users', label: isAdmin ? '고객 DB' : '내 담당 고객' }, { key: 'callbacks', icon: 'clock', label: '재통화 일정' }, { key: 'account', icon: 'users', label: '내 계정 설정' }, ...(isAdmin ? [{ key: 'assign', icon: 'assign', label: '고객 배분' }, { key: 'team', icon: 'grid', label: '직원 관리' }] : [])] as item}<a
             href={paths[item.key]}
             aria-current={view === item.key ? 'page' : undefined}
             aria-label={item.label}
@@ -457,6 +485,36 @@
               description="페이지 주소가 잘못되었거나 더 이상 사용하지 않는 주소입니다."
             />
             <a class="btn btn-primary" href="/">대시보드로</a>
+          {:else if view === 'callbacks' || view === 'staff'}
+            <h1 data-page-heading tabindex="-1">{titles[view]}</h1>
+            {#if view === 'staff' && users.isPending}<AsyncState
+                loading
+                message="직원 정보를 불러오고 있어요…"
+              />
+            {:else if view === 'staff' && users.isError}<AsyncState
+                message={users.error.message}
+                retry={() => users.refetch()}
+              />
+            {:else if view === 'staff' && !users.data?.some((user) => user.id === route.memberId)}
+              <EmptyState
+                title="직원을 찾을 수 없습니다"
+                description="직원 목록에서 다시 선택해 주세요."
+              /><a href="/team" class="btn btn-secondary">직원 목록으로</a>
+            {:else}<WorkList
+                member={view === 'staff'
+                  ? users.data?.find((user) => user.id === route.memberId)
+                  : undefined}
+              />{/if}
+          {:else if view === 'account'}
+            <h1 data-page-heading tabindex="-1">내 계정 설정</h1>
+            <Account
+              onsaved={(user) => {
+                session = user;
+              }}
+              onpasswordchanged={() => {
+                showLogin();
+              }}
+            />
           {:else if detailPage}
             <a
               class="back-link"
@@ -491,6 +549,12 @@
                   }}
                   onexisting={(id) => navigation.go(detailHref(id))}
                 />{/if}
+            {:else if selectedId && route.recordId}<RecordDetail
+                id={selectedId}
+                recordId={route.recordId}
+                backHref={detailHref(selectedId, 'timeline')}
+                onrefresh={refresh}
+              />
             {:else if selectedId}<LeadPanel
                 id={selectedId}
                 tab={route.tab || 'activity'}
@@ -610,6 +674,14 @@
                   >
                 </div>
                 <div class="filters">
+                  <select
+                    aria-label="배분 후 처리 필터"
+                    bind:value={workPending}
+                    onchange={resetPage}
+                  >
+                    <option value="">전체 처리 여부</option>
+                    <option value="true">배분 후 미처리</option>
+                  </select>
                   <div class="search-box">
                     <Icon name="search" size={18} /><input
                       aria-label="고객 검색"
@@ -663,6 +735,7 @@
                           source = '';
                           assignee = '';
                           assignment = '';
+                          workPending = '';
                           acquiredFrom = '';
                           acquiredTo = '';
                           resetPage();
@@ -688,6 +761,7 @@
                     source ||
                     assignee ||
                     assignment ||
+                    workPending ||
                     acquiredFrom ||
                     acquiredTo
                       ? '검색 결과가 없습니다'
@@ -711,8 +785,9 @@
                                     : [])}
                               /></th
                             >{/if}<th>고객 정보</th><th>현재 상태</th><th>유입 경로</th
-                          >{#if isAdmin}<th>담당자</th>{/if}<th>유입일</th><th>최근 활동</th><th
-                          ></th></tr
+                          >{#if isAdmin}<th>담당자</th><th>유입일</th>{:else}<th>최근 메모</th><th
+                              >배분일</th
+                            >{/if}<th>최근 활동</th><th></th></tr
                         ></thead
                       ><tbody
                         >{#each leads.data.items as lead (lead.id)}<tr
@@ -740,7 +815,10 @@
                             ><td
                               ><Badge tone={lead.current_status}
                                 >{statuses[lead.current_status]}</Badge
-                              ></td
+                              >
+                              {#if lead.assignment_pending}<small class="assignment-note"
+                                  >배분 후 미처리</small
+                                >{/if}</td
                             ><td
                               ><span class="source-label"
                                 >{lead.source ? sources[lead.source] : '—'}</span
@@ -750,13 +828,20 @@
                                     >{lead.assignee_name.slice(0, 1)}</span
                                   >{lead.assignee_name}{:else}<span class="muted">미배분</span
                                   >{/if}</td
-                              >{/if}<td class="muted numeric">{date(lead.acquired_at)}</td><td
+                              ><td class="muted numeric">{date(lead.acquired_at)}</td>
+                            {:else}<td class="memo-cell"
+                                >{lead.latest_memo || '아직 상담 메모가 없습니다.'}</td
+                              ><td class="muted numeric">{date(lead.assigned_at, true)}</td>{/if}<td
                               class="muted numeric">{date(lead.last_activity_at, true)}</td
                             ><td
                               ><a
-                                class="icon-button"
-                                aria-label={`${lead.name} 상세 보기`}
-                                href={leadHref(lead.id)}><Icon name="arrow" size={17} /></a
+                                class="btn btn-ghost"
+                                aria-label={`${lead.name} ${isAdmin ? '상세 보기' : '업무 처리'}`}
+                                href={leadHref(lead.id)}
+                                >{isAdmin ? '상세 보기' : '업무 처리'}<Icon
+                                  name="arrow"
+                                  size={17}
+                                /></a
                               ></td
                             ></tr
                           >{/each}</tbody
@@ -791,6 +876,7 @@
                   </div>
                   <div class="staff-cards">
                     {#each dashboard.data.staff as member}<div class="staff-card">
+                        <a class="text-button" href={`/team/${member.id}/work`}>업무 상세</a>
                         <span class="avatar">{member.name.slice(0, 1)}</span>
                         <div>
                           <strong>{member.name}</strong><small
@@ -834,7 +920,10 @@
             onclick={() => (assigning = false)}><Icon name="close" /></button
           >
         </div>
-        <p class="muted">선택한 고객 {selected.length}명을 선택 순서대로 균등 배분합니다.</p>
+        <p class="muted">
+          선택한 고객 {selected.length}명을 선택한 직원에게 순서대로 균등 배분합니다. 기존 보유
+          건수는 계산에 포함하지 않습니다.
+        </p>
         <fieldset disabled={pending}>
           <div class="employee-choices">
             {#if users.isPending}<AsyncState

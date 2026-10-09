@@ -14,7 +14,8 @@
     type User,
   } from '@leadflow/api-client';
   import { Badge, Button, Field, Icon, AsyncState } from '@leadflow/ui';
-  import { protectChanges } from './navigation.svelte';
+  import { protectChanges, useNavigation } from './navigation.svelte';
+  const navigation = useNavigation();
   let {
     id,
     tab,
@@ -74,6 +75,7 @@
   });
   async function save(e: SubmitEvent) {
     e.preventDefault();
+    const returnToList = (e.submitter as HTMLButtonElement | null)?.value === 'return';
     if (pending || conflict) return;
     pending = true;
     error = '';
@@ -93,6 +95,7 @@
       memo = '';
       success = '업무 기록을 저장했습니다.';
       await onrefresh();
+      if (returnToList) onclose();
     } catch (e) {
       error = (e as Error).message;
       conflict = e instanceof ApiError && e.status === 409;
@@ -134,6 +137,46 @@
   }
 </script>
 
+{#snippet history(customer: Lead)}
+  <div class="timeline">
+    {#each customer.timeline || [] as event (event.id)}<article class="timeline-item">
+        <span class="timeline-dot"
+          ><Icon name={event.kind === 'ASSIGNMENT' ? 'assign' : 'clock'} size={14} /></span
+        >
+        <div>
+          <div class="timeline-heading">
+            <strong
+              >{event.kind === 'ASSIGNMENT'
+                ? '담당자 배분'
+                : event.activity_type
+                  ? activities[event.activity_type]
+                  : '업무 기록'}</strong
+            ><time>{date(event.created_at, true)}</time>
+          </div>
+          {#if event.kind === 'ACTIVITY'}<a
+              class="text-button"
+              id={`record-${event.id}`}
+              href={`/leads/${id}/records/${event.id}?from=${encodeURIComponent(navigation.url.searchParams.get('from') || '/leads')}`}
+              >기록 상세·정정</a
+            >{/if}
+          <small
+            >{event.actor_name}{event.kind === 'ASSIGNMENT'
+              ? ` → ${event.assignee_name || '담당자'}`
+              : ''}</small
+          >{#if event.new_status}<div class="status-transition">
+              {event.previous_status ? statuses[event.previous_status] : ''} → <Badge
+                tone={event.new_status}>{statuses[event.new_status]}</Badge
+              >
+            </div>{/if}{#if event.memo || event.reason}<p>
+              {event.memo || event.reason}
+            </p>{/if}
+        </div>
+      </article>{:else}<p class="muted">
+        아직 기록된 활동이 없습니다. 첫 업무 기록을 남겨 보세요.
+      </p>{/each}
+  </div>
+{/snippet}
+
 <section class="panel detail-page" aria-label="고객 상세">
   {#if lead.isPending}<AsyncState
       loading
@@ -172,10 +215,21 @@
           <dd>{date(customer.acquired_at, true)}</dd>
         </div>
         <div>
+          <dt>시스템 등록일</dt>
+          <dd>{date(customer.created_at, true)}</dd>
+        </div>
+        <div>
+          <dt>현재 담당자 배분일</dt>
+          <dd>{date(customer.assigned_at, true)}</dd>
+        </div>
+        <div>
           <dt>재통화 일정</dt>
           <dd>{date(customer.callback_at, true)}</dd>
         </div>
       </dl>
+      {#if customer.assignment_pending}<p class="field-hint">
+          배분 후 미처리 · 현재 담당자가 이번 배분 이후 아직 업무 기록을 남기지 않았습니다.
+        </p>{/if}
       {#if customer.initial_memo}<div class="initial-memo">
           <small>최초 메모</small>
           <p>{customer.initial_memo}</p>
@@ -235,47 +289,60 @@
             >{/if}
         </div>{/if}{#if success}<p class="alert success" role="status">
           {success}
-        </p>{/if}{#if tab === 'activity'}<form
-          class="activity-form"
-          aria-busy={pending}
-          oninput={() => (dirty = true)}
-          onchange={() => (dirty = true)}
-          onsubmit={save}
-        >
-          <fieldset disabled={pending || conflict}>
-            <h3>어떤 업무를 진행하셨나요?</h3>
-            <div class="activity-options">
-              {#each Object.entries(activities) as [key, label]}<button
-                  type="button"
-                  class:chosen={activity === key}
-                  aria-pressed={activity === key}
-                  onclick={() => {
-                    activity = key;
-                    dirty = true;
-                  }}>{label}</button
-                >{/each}
-            </div>
-            {#if activity === 'KAKAO_SENT'}<p class="field-hint">
-                외부에서 전달한 카카오톡을 수동 기록합니다.
-              </p>{/if}<Field label="현재 상태"
-              ><select bind:value={status}
-                >{#each Object.entries(statuses) as [key, label]}<option value={key}>{label}</option
-                  >{/each}</select
-              ></Field
-            >{#if status === 'CALLBACK'}<Field label="재통화 일시 * (한국 표준시)"
-                ><input type="datetime-local" bind:value={callback} required /></Field
-              >{/if}<Field label="업무 메모"
-              ><textarea
-                bind:value={memo}
-                rows="5"
-                placeholder="연락 결과와 다음에 확인할 내용을 남겨 주세요."
-                maxlength="10000"
-              ></textarea></Field
-            ><Button type="submit" disabled={pending}
-              ><Icon name="check" size={17} />{pending ? '저장 중…' : '업무 기록 저장'}</Button
-            >
-          </fieldset>
-        </form>{:else if tab === 'assignment'}<form
+        </p>{/if}{#if tab === 'activity'}<div class="consultation-layout">
+          <form
+            class="activity-form"
+            aria-busy={pending}
+            oninput={() => (dirty = true)}
+            onchange={() => (dirty = true)}
+            onsubmit={save}
+          >
+            <fieldset disabled={pending || conflict}>
+              <h3>어떤 업무를 진행하셨나요?</h3>
+              <div class="activity-options">
+                {#each Object.entries(activities) as [key, label]}<button
+                    type="button"
+                    class:chosen={activity === key}
+                    aria-pressed={activity === key}
+                    onclick={() => {
+                      activity = key;
+                      dirty = true;
+                    }}>{label}</button
+                  >{/each}
+              </div>
+              {#if activity === 'KAKAO_SENT'}<p class="field-hint">
+                  외부에서 전달한 카카오톡을 수동 기록합니다.
+                </p>{/if}<Field label="현재 상태"
+                ><select bind:value={status}
+                  >{#each Object.entries(statuses) as [key, label]}<option value={key}
+                      >{label}</option
+                    >{/each}</select
+                ></Field
+              >{#if status === 'CALLBACK'}<Field label="재통화 일시 * (한국 표준시)"
+                  ><input type="datetime-local" bind:value={callback} required /></Field
+                >{/if}<Field label="업무 메모"
+                ><textarea
+                  bind:value={memo}
+                  rows="5"
+                  placeholder="연락 결과와 다음에 확인할 내용을 남겨 주세요."
+                  maxlength="10000"
+                ></textarea></Field
+              >
+              <div class="consultation-actions">
+                <Button type="submit" disabled={pending}
+                  ><Icon name="check" size={17} />{pending ? '저장 중…' : '업무 기록 저장'}</Button
+                >
+                <Button type="submit" value="return" variant="secondary" disabled={pending}
+                  >저장 후 목록으로</Button
+                >
+              </div>
+            </fieldset>
+          </form>
+          <section class="consultation-history" aria-label="이전 상담 및 배분 이력">
+            <h3>이전 상담 및 배분 이력</h3>
+            {@render history(customer)}
+          </section>
+        </div>{:else if tab === 'assignment'}<form
           class="activity-form"
           aria-busy={pending}
           oninput={() => (dirty = true)}
@@ -294,6 +361,10 @@
               >
                 변경 가능한 직원이 없습니다.
               </p>{/if}
+            <p class="field-hint">
+              재배분해도 상담 상태·재통화 일정·기존 기록은 유지됩니다. 이전 담당자는 더 이상 조회할
+              수 없습니다.
+            </p>
             <Field label="새 담당자"
               ><select bind:value={assignee} required
                 ><option value="" disabled>직원을 선택하세요</option
@@ -310,36 +381,6 @@
               >{pending ? '변경 중…' : '담당자 변경'}</Button
             >
           </fieldset>
-        </form>{:else}<div class="timeline">
-          {#each customer.timeline || [] as event (event.id)}<article class="timeline-item">
-              <span class="timeline-dot"
-                ><Icon name={event.kind === 'ASSIGNMENT' ? 'assign' : 'clock'} size={14} /></span
-              >
-              <div>
-                <div class="timeline-heading">
-                  <strong
-                    >{event.kind === 'ASSIGNMENT'
-                      ? '담당자 배분'
-                      : event.activity_type
-                        ? activities[event.activity_type]
-                        : '업무 기록'}</strong
-                  ><time>{date(event.created_at, true)}</time>
-                </div>
-                <small
-                  >{event.actor_name}{event.kind === 'ASSIGNMENT'
-                    ? ` → ${event.assignee_name || '담당자'}`
-                    : ''}</small
-                >{#if event.new_status}<div class="status-transition">
-                    {event.previous_status ? statuses[event.previous_status] : ''} → <Badge
-                      tone={event.new_status}>{statuses[event.new_status]}</Badge
-                    >
-                  </div>{/if}{#if event.memo || event.reason}<p>
-                    {event.memo || event.reason}
-                  </p>{/if}
-              </div>
-            </article>{:else}<p class="muted">
-              아직 기록된 활동이 없습니다. 첫 업무 기록을 남겨 보세요.
-            </p>{/each}
-        </div>{/if}
+        </form>{:else}{@render history(customer)}{/if}
     </div>{/if}
 </section>
