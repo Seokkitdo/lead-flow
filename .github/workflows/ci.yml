@@ -70,7 +70,9 @@ jobs:
           POSTGRES_PASSWORD: ci-only-password
           WEB_DOMAIN: crm.example.com
           ADMIN_DOMAIN: admin.example.com
-        run: docker compose run --rm --no-deps gateway caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+        run: |
+          docker compose run --rm --no-deps gateway caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker compose run --rm --no-deps -e WEB_DOMAIN=192.0.2.1 gateway caddy validate --config /etc/caddy/Caddyfile.ip --adapter caddyfile
       - name: Validate deployment scripts and Compose
         env:
           POSTGRES_PASSWORD: ci-only-password

@@ -11,6 +11,6 @@ COPY apps/admin apps/admin
 RUN pnpm --filter @leadflow/web build && pnpm --filter @leadflow/admin build
 
 FROM caddy:2-alpine
-COPY infra/Caddyfile /etc/caddy/Caddyfile
+COPY infra/Caddyfile infra/Caddyfile.ip infra/security.caddy /etc/caddy/
 COPY --from=build /workspace/apps/web/dist /srv/web
 COPY --from=build /workspace/apps/admin/dist /srv/admin

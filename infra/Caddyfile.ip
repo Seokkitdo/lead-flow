@@ -1,0 +1,17 @@
+import security.caddy
+
+https://{$WEB_DOMAIN} {
+  tls {
+    issuer acme {
+      dir https://acme-v02.api.letsencrypt.org/directory
+      profile shortlived
+      disable_tlsalpn_challenge
+    }
+  }
+  import security
+  handle {
+    root * /srv/web
+    try_files {path} /index.html
+    file_server
+  }
+}

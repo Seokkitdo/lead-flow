@@ -50,6 +50,7 @@ services:
     build:
       context: .
       dockerfile: infra/frontend.Dockerfile
+    command: [caddy, run, --config, '${CADDY_CONFIG:-/etc/caddy/Caddyfile}', --adapter, caddyfile]
     environment:
       WEB_DOMAIN: ${WEB_DOMAIN:?Set WEB_DOMAIN}
       ADMIN_DOMAIN: ${ADMIN_DOMAIN:?Set ADMIN_DOMAIN}

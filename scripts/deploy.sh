@@ -65,7 +65,8 @@ restore_db=''
 mapfile -t domains < <("${compose[@]}" config --format json | python3 -c 'import json,sys; e=json.load(sys.stdin)["services"]["gateway"]["environment"]; print(e["WEB_DOMAIN"]); print(e["ADMIN_DOMAIN"])')
 test "${#domains[@]}" -eq 2
 for domain in "${domains[@]}"; do
-  curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-connrefused --max-time 15 "https://$domain/api/health"
+  # Initial ACME issuance can temporarily fail the TLS handshake. Only retry GETs.
+  curl --fail --silent --show-error --retry 36 --retry-delay 5 --retry-all-errors --retry-max-time 300 --max-time 15 "https://$domain/api/health"
   curl --fail --silent --show-error --max-time 15 --output /dev/null "https://$domain/"
 done
 
