@@ -22,7 +22,11 @@ async function fixture(page: Page) {
   expect(userResponse.ok()).toBeTruthy();
   const user = await userResponse.json();
   const leadResponse = await page.request.post(ORIGIN + '/api/leads', {
-    data: { name: '합성재통화고객', phone: '010-0000-7890', allow_duplicate: true },
+    data: {
+      name: '합성재통화고객',
+      phone: '010-0000-7890',
+      allow_duplicate: true,
+    },
   });
   const lead = await leadResponse.json();
   expect(
@@ -61,19 +65,28 @@ test('관리자는 직원 업무 상세에서 필터링하고 고객 이력과 �
   await row.getByRole('link', { name: '업무 상세', exact: true }).click();
   await expect(page).toHaveURL(ORIGIN + `/team/${user.id}/work`);
   await expect(page.getByRole('heading', { name: '직원 업무 상세', exact: true })).toBeVisible();
-  await page.getByLabel('처리 여부').selectOption('true');
+  await expect(page.getByLabel('전체 담당 고객 업무 요약')).toContainText('1명');
+  await expect(page.getByRole('columnheader', { name: '배정일', exact: true })).toBeVisible();
+  await page.getByLabel('담당 고객 검색').fill('없는합성고객');
+  await page.getByRole('button', { name: '검색', exact: true }).click();
+  await expect(page.getByText('해당하는 고객이 없습니다')).toBeVisible();
+  await expect(page.getByLabel('전체 담당 고객 업무 요약')).toContainText('1명');
+  await page.getByLabel('담당 고객 검색').fill(lead.name);
+  await page.getByRole('button', { name: '검색', exact: true }).click();
+  await page.getByLabel('배정 후 기록 여부').selectOption('true');
   await expect(page.getByRole('link', { name: lead.name, exact: true })).toBeVisible();
-  await page.getByRole('combobox', { name: '업무 상태', exact: true }).selectOption('CALLBACK');
+  await page.getByRole('combobox', { name: '상담 상태', exact: true }).selectOption('CALLBACK');
   const listUrl = page.url();
   await page.reload();
-  await expect(page.getByLabel('처리 여부')).toHaveValue('true');
+  await expect(page.getByLabel('배정 후 기록 여부')).toHaveValue('true');
+  await expect(page.getByLabel('담당 고객 검색')).toHaveValue(lead.name);
   await page.getByRole('link', { name: lead.name, exact: true }).click();
   await expect(page.getByRole('heading', { name: lead.name, exact: true })).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(listUrl);
   await expect(page.locator(`#work-lead-${lead.id}`)).toBeFocused();
   await page.getByRole('link', { name: '계정 관리', exact: true }).click();
-  await expect(page.getByLabel('로그인 ID *', { exact: true })).toHaveValue(user.login_id);
+  await expect(page.getByLabel('로그인 아이디 *', { exact: true })).toHaveValue(user.login_id);
   await page.goto(ORIGIN + `/team/${user.id}/work?status=COMPLETED`);
   await expect(page.getByText('해당하는 고객이 없습니다')).toBeVisible();
   await page.goto(ORIGIN + '/account');
@@ -83,12 +96,14 @@ test('관리자는 직원 업무 상세에서 필터링하고 고객 이력과 �
   await expect(page.getByRole('status')).toContainText('계정 정보를 저장했습니다');
 });
 
-test('직원은 재통화 상세에서 원본을 보존해 정정하고 계정 비밀번호를 변경한다', async ({
+test('직원은 재통화 상세에서 기존 기록을 보존해 바로잡고 계정 비밀번호를 변경한다', async ({
   page,
   browser,
 }, testInfo) => {
   const { user, lead } = await fixture(page);
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+  });
   const staff = await context.newPage();
   expect(
     (
@@ -99,29 +114,34 @@ test('직원은 재통화 상세에서 원본을 보존해 정정하고 계정 �
   ).toBeTruthy();
   await staff.goto(ORIGIN + '/callbacks');
   await expect(staff.getByRole('link', { name: lead.name, exact: true })).toBeVisible();
-  await staff.getByRole('link', { name: '기한 초과', exact: true }).click();
+  await staff.getByRole('link', { name: '예정 시간 지남', exact: true }).click();
   await staff.reload();
-  await expect(staff.getByRole('link', { name: '기한 초과', exact: true })).toHaveAttribute(
+  await expect(staff.getByRole('link', { name: '예정 시간 지남', exact: true })).toHaveAttribute(
     'aria-current',
     'page',
   );
   await staff.getByRole('link', { name: lead.name, exact: true }).click();
-  await staff.getByRole('link', { name: '기록 상세·정정', exact: true }).first().click();
+  await staff.getByRole('link', { name: '기록 상세', exact: true }).first().click();
   await staff.reload();
   await expect(staff.getByRole('heading', { name: '업무 기록 상세' })).toBeVisible();
   await staff.getByLabel('사유 *', { exact: true }).fill('합성 입력 오류');
-  await staff.getByLabel('정정 내용 *', { exact: true }).fill('합성 정정된 상담');
-  await staff.getByLabel('저장할 현재 상태').selectOption('HOLD');
+  await staff.getByLabel('바로잡을 내용 *', { exact: true }).fill('합성 정정된 상담');
+  await staff.getByLabel('저장 후 상담 상태').selectOption('HOLD');
   staff.once('dialog', (dialog) => dialog.dismiss());
-  await staff.getByRole('link', { name: '전체 타임라인으로', exact: true }).click();
-  await expect(staff.getByLabel('정정 내용 *', { exact: true })).toHaveValue('합성 정정된 상담');
-  await staff.screenshot({ path: testInfo.outputPath('record-mobile.png'), fullPage: true });
+  await staff.getByRole('link', { name: '전체 기록으로', exact: true }).click();
+  await expect(staff.getByLabel('바로잡을 내용 *', { exact: true })).toHaveValue(
+    '합성 정정된 상담',
+  );
+  await staff.screenshot({
+    path: testInfo.outputPath('record-mobile.png'),
+    fullPage: true,
+  });
   expect(
     await staff.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
   ).toBeTruthy();
-  await staff.getByRole('button', { name: '정정·취소 기록 저장' }).click();
-  await expect(staff.getByRole('status')).toContainText('원본을 보존');
-  await staff.getByRole('link', { name: '전체 타임라인으로', exact: true }).click();
+  await staff.getByRole('button', { name: '변경 내용 저장' }).click();
+  await expect(staff.getByRole('status')).toContainText('기존 기록은 그대로');
+  await staff.getByRole('link', { name: '전체 기록으로', exact: true }).click();
   await expect(staff.getByText('합성 최초 상담', { exact: true })).toBeVisible();
   await expect(staff.getByText(/합성 정정된 상담/)).toBeVisible();
   await staff.getByRole('link', { name: '목록으로', exact: true }).click();
@@ -138,7 +158,7 @@ test('직원은 재통화 상세에서 원본을 보존해 정정하고 계정 �
   await staff.getByLabel('새 비밀번호 확인', { exact: true }).fill('changed-password-123');
   await staff.getByRole('button', { name: '계정 정보 저장' }).click();
   await expect(staff).toHaveURL(/\/login\?next=%2Faccount/);
-  await staff.getByLabel('로그인 ID', { exact: true }).fill(user.login_id);
+  await staff.getByLabel('로그인 아이디', { exact: true }).fill(user.login_id);
   await staff.getByLabel('비밀번호', { exact: true }).fill('changed-password-123');
   await staff.getByRole('button', { name: '로그인', exact: true }).click();
   await expect(staff).toHaveURL(ORIGIN + '/account');
@@ -178,4 +198,48 @@ test('추가 페이지의 조회 오류·없는 기록·계정 충돌은 복구 
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: '최신 계정 정보 불러오기' }).click();
   await expect(page.getByLabel('연락처', { exact: true })).toHaveValue('010-0000-9876');
+});
+
+test('직원 정보 셀 전체에서 상세로 이동하고 상세 여백과 모바일 배치를 유지한다', async ({
+  page,
+}, testInfo) => {
+  const { user } = await fixture(page);
+  await page.goto(ORIGIN + '/team');
+  for (let column = 0; column < 6; column++) {
+    const row = page.getByRole('row').filter({ hasText: user.login_id });
+    // Click the padding rather than the text; every informational cell is a target.
+    await row
+      .getByRole('cell')
+      .nth(column)
+      .click({ position: { x: 4, y: 4 } });
+    await expect(page).toHaveURL(ORIGIN + `/team/${user.id}/work`);
+    await page.goBack();
+    await expect(page).toHaveURL(ORIGIN + '/team');
+  }
+  const mainLink = page.locator(`#member-work-${user.id}`);
+  await mainLink.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: '직원 업무 상세', exact: true })).toBeFocused();
+  const profile = page.getByRole('region', { name: '직원 기본 정보' });
+  const summary = page.getByRole('region', { name: '직원 업무 요약' });
+  const profileBox = await profile.boundingBox();
+  const summaryBox = await summary.boundingBox();
+  expect(summaryBox!.y - profileBox!.y - profileBox!.height).toBeGreaterThanOrEqual(23);
+  const info = await profile.locator('dl').boundingBox();
+  expect(info!.x - profileBox!.x).toBeGreaterThanOrEqual(24);
+  await page.screenshot({ path: testInfo.outputPath('staff-detail-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByLabel('담당 고객 검색')).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+  ).toBeTruthy();
+  const search = await page.getByLabel('담당 고객 검색').boundingBox();
+  const state = await page.getByRole('combobox', { name: '상담 상태', exact: true }).boundingBox();
+  expect(state!.y).toBeGreaterThan(search!.y + search!.height);
+  await page.screenshot({ path: testInfo.outputPath('staff-detail-mobile.png'), fullPage: true });
+  await page.getByRole('link', { name: '직원 목록으로', exact: true }).click();
+  const row = page.getByRole('row').filter({ hasText: user.login_id });
+  await row.getByRole('link', { name: '계정 관리', exact: true }).click();
+  await expect(page).toHaveURL(ORIGIN + `/team/${user.id}`);
+  await expect(page.getByLabel(/^새 비밀번호/)).toBeVisible();
 });

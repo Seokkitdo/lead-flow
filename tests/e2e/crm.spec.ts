@@ -6,7 +6,7 @@ const employeePassword = 'e2e-only-staff-password';
 
 async function login(page: Page, url: string, loginId: string, password: string) {
   await page.goto(url);
-  await page.getByLabel('로그인 ID').fill(loginId);
+  await page.getByLabel('로그인 아이디').fill(loginId);
   await page.getByLabel('비밀번호', { exact: true }).fill(password);
   await page.getByRole('button', { name: '로그인', exact: true }).click();
   await expect(page.getByRole('navigation', { name: '주 메뉴' })).toBeVisible();
@@ -14,7 +14,7 @@ async function login(page: Page, url: string, loginId: string, password: string)
 
 // The server is bootstrapped into a temporary database for each test run.
 // All customer and staff records below are synthetic and created through the app.
-test('관리자 등록·중복 확인·배분 → 직원 재통화 기록 → 재배분 접근 차단', async ({
+test('관리자 등록·중복 확인·배정 → 직원 재통화 기록 → 담당자 재배정 접근 차단', async ({
   page,
   browser,
 }, testInfo) => {
@@ -29,34 +29,34 @@ test('관리자 등록·중복 확인·배분 → 직원 재통화 기록 → �
     await page.getByRole('link', { name: '직원 등록', exact: true }).click();
     const form = page.getByRole('region', { name: '직원 계정 관리' });
     await form.getByLabel('이름 *', { exact: true }).fill(name);
-    await form.getByLabel('로그인 ID *', { exact: true }).fill(loginId);
+    await form.getByLabel('로그인 아이디 *', { exact: true }).fill(loginId);
     await form.getByLabel('초기 비밀번호', { exact: false }).fill(employeePassword);
-    await form.getByRole('button', { name: '저장하기' }).click();
+    await form.getByRole('button', { name: '직원 등록' }).click();
     await expect(form).not.toBeVisible();
     await expect(page.getByRole('row').filter({ hasText: loginId })).toBeVisible();
   }
-  await page.getByRole('navigation').getByRole('link', { name: '고객 DB', exact: true }).click();
+  await page.getByRole('navigation').getByRole('link', { name: '고객 목록', exact: true }).click();
   for (const name of ['합성고객하나', '합성중복고객']) {
     await page.getByRole('button', { name: '고객 등록', exact: true }).click();
     const form = page.getByRole('region', { name: '고객 등록', exact: true });
     await form.getByLabel('이름 *', { exact: true }).fill(name);
     await form.getByLabel('연락처 *', { exact: true }).fill('010-0000-9999');
-    await form.getByLabel('최초 메모').fill('합성 데이터: 테스트 전용 문의');
+    await form.getByLabel('등록 메모').fill('합성 데이터: 테스트 전용 문의');
     await form.getByRole('button', { name: '고객 등록', exact: true }).click();
     if (name === '합성중복고객') {
-      await expect(form.getByText('같은 연락처의 고객이 있습니다')).toBeVisible();
+      await expect(form.getByText('같은 연락처로 등록된 고객이 있습니다')).toBeVisible();
       await expect(form.getByRole('button', { name: '기존 고객 보기' })).toBeVisible();
-      await form.getByRole('button', { name: '확인했어요, 그래도 등록' }).click();
+      await form.getByRole('button', { name: '같은 번호로 새 고객 등록' }).click();
     }
     await expect(form).not.toBeVisible();
     await page.getByRole('link', { name: '목록으로', exact: true }).click();
   }
   await page.getByLabel('합성고객하나 선택', { exact: true }).check();
-  await page.getByRole('button', { name: '담당자 배분', exact: true }).click();
-  const assignment = page.getByRole('dialog', { name: '담당자 배분' });
+  await page.getByRole('button', { name: '담당자 배정', exact: true }).click();
+  const assignment = page.getByRole('dialog', { name: '담당자 배정' });
   await assignment.getByRole('checkbox', { name: /가상직원하나/ }).check();
-  await assignment.getByLabel('배분 사유').fill('E2E 최초 배분');
-  await assignment.getByRole('button', { name: '1명 배분하기' }).click();
+  await assignment.getByLabel('배정 사유').fill('E2E 최초 배정');
+  await assignment.getByRole('button', { name: '1명 배정하기' }).click();
   await expect(assignment).not.toBeVisible();
   await expect(page.getByRole('row').filter({ hasText: '합성고객하나' })).toContainText(
     '가상직원하나',
@@ -67,7 +67,7 @@ test('관리자 등록·중복 확인·배분 → 직원 재통화 기록 → �
     animations: 'disabled',
     fullPage: true,
   });
-  await page.getByRole('navigation').getByRole('link', { name: '대시보드', exact: true }).click();
+  await page.getByRole('navigation').getByRole('link', { name: '업무 현황', exact: true }).click();
   await page.screenshot({
     path: testInfo.outputPath('admin-dashboard.png'),
     animations: 'disabled',
@@ -108,23 +108,23 @@ test('관리자 등록·중복 확인·배분 → 직원 재통화 기록 → �
       await staff.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await detail.getByRole('button', { name: '전화 연결', exact: true }).click();
-    await detail.getByLabel('현재 상태').selectOption('CALLBACK');
+    await detail.getByLabel('상담 상태').selectOption('CALLBACK');
     await detail.getByLabel('재통화 일시').fill('2030-10-01T14:30');
     await detail.getByLabel('업무 메모').fill('합성 통화 기록: 다음 상담에서 다시 연락');
     await detail.getByRole('button', { name: '업무 기록 저장' }).click();
     await expect(detail.getByRole('status')).toHaveText('업무 기록을 저장했습니다.');
-    await expect(detail.getByRole('region', { name: '이전 상담 및 배분 이력' })).toContainText(
+    await expect(detail.getByRole('region', { name: '이전 상담 및 배정 이력' })).toContainText(
       '합성 통화 기록: 다음 상담에서 다시 연락',
     );
     await staff.screenshot({
       path: testInfo.outputPath('staff-mobile-consultation.png'),
       fullPage: true,
     });
-    await detail.getByRole('link', { name: /전체 타임라인/ }).click();
+    await detail.getByRole('link', { name: /전체 기록/ }).click();
     await expect(
       detail.getByText('합성 통화 기록: 다음 상담에서 다시 연락', { exact: true }),
     ).toBeVisible();
-    await expect(detail.getByText('E2E 최초 배분', { exact: true })).toBeVisible();
+    await expect(detail.getByText('E2E 최초 배정', { exact: true })).toBeVisible();
     const saved = await (await staff.request.get(`${STAFF_URL}/api/leads/${leadId}`)).json();
     expect(saved.current_status).toBe('CALLBACK');
     expect(new Date(saved.callback_at).toISOString()).toBe('2030-10-01T05:30:00.000Z');
@@ -141,7 +141,7 @@ test('관리자 등록·중복 확인·배분 → 직원 재통화 기록 → �
     const adminDetail = page.getByRole('region', { name: '고객 상세', exact: true });
     await adminDetail.getByRole('link', { name: '담당자 변경', exact: true }).click();
     await adminDetail.getByLabel('새 담당자').selectOption({ label: '가상직원둘' });
-    await adminDetail.getByLabel('변경 사유').fill('E2E 재배분 권한 확인');
+    await adminDetail.getByLabel('변경 사유').fill('E2E 담당자 재배정 권한 확인');
     await adminDetail
       .locator('form')
       .getByRole('button', { name: '담당자 변경', exact: true })
@@ -160,8 +160,8 @@ test('관리자 등록·중복 확인·배분 → 직원 재통화 기록 → �
       .getByRole('link', { name: '계정 관리' })
       .click();
     const account = page.getByRole('region', { name: '직원 계정 관리' });
-    await account.getByLabel('재직 상태').selectOption('INACTIVE');
-    await account.getByRole('button', { name: '저장하기' }).click();
+    await account.getByLabel('직원 상태').selectOption('INACTIVE');
+    await account.getByRole('button', { name: '변경 사항 저장' }).click();
     await expect(account).not.toBeVisible();
     expect((await staff.request.get(`${STAFF_URL}/api/auth/me`)).status()).toBe(401);
     await staff.reload();
@@ -175,13 +175,64 @@ test('관리자 등록·중복 확인·배분 → 직원 재통화 기록 → �
 test('로그인 오류를 표시하고 모바일에서도 입력 폼이 화면 안에 유지된다', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(STAFF_URL);
-  await page.getByLabel('로그인 ID').fill('does-not-exist');
+  await page.getByLabel('로그인 아이디').fill('does-not-exist');
   await page.getByLabel('비밀번호', { exact: true }).fill('wrong-e2e-password');
   await page.getByRole('button', { name: '로그인', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('아이디 또는 비밀번호');
-  await expect(page.getByLabel('로그인 ID')).toHaveValue('does-not-exist');
+  await expect(page.getByLabel('로그인 아이디')).toHaveValue('does-not-exist');
   await expect(page.getByRole('button', { name: '로그인', exact: true })).toBeEnabled();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
+});
+
+test('고객 필수값 검증과 전화번호 자동 하이픈 입력', async ({ page }) => {
+  await login(page, ADMIN_URL, 'e2e-admin', 'e2e-only-admin-password');
+  await page.goto('/leads/new');
+  const form = page.getByRole('region', { name: '고객 등록', exact: true });
+  const name = form.getByLabel('이름 *', { exact: true });
+  const phone = form.getByLabel('연락처 *', { exact: true });
+  const submit = form.getByRole('button', { name: '고객 등록', exact: true });
+  let mutations = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/api/leads')) mutations++;
+  });
+  await name.fill('   ');
+  await phone.fill('01000004321');
+  await expect(phone).toHaveValue('010-0000-4321');
+  await submit.click();
+  await expect(name).toBeFocused();
+  expect(await name.evaluate((el: HTMLInputElement) => el.validationMessage)).toContain(
+    '고객 이름',
+  );
+  await name.fill('  합성입력검증고객  ');
+  await phone.fill('010123');
+  await submit.click();
+  await expect(phone).toBeFocused();
+  expect(await phone.evaluate((el: HTMLInputElement) => el.validationMessage)).toContain(
+    '연락처를 확인',
+  );
+  await phone.fill('abc01000004321');
+  await submit.click();
+  expect(mutations).toBe(0);
+  for (const [raw, formatted] of [
+    ['021234567', '02-123-4567'],
+    ['0212345678', '02-1234-5678'],
+    ['0311234567', '031-123-4567'],
+    ['15880000', '1588-0000'],
+  ]) {
+    await phone.fill(raw);
+    await expect(phone).toHaveValue(formatted);
+  }
+  await phone.fill('');
+  await phone.pressSequentially('01000004321');
+  await expect(phone).toHaveValue('010-0000-4321');
+  await phone.press('Backspace');
+  await expect(phone).toHaveValue('010-000-0432');
+  await phone.press('1');
+  await expect(phone).toHaveValue('010-0000-4321');
+  await submit.click();
+  await expect(form).not.toBeVisible();
+  await expect(page.getByRole('heading', { name: '합성입력검증고객', exact: true })).toBeVisible();
+  expect(mutations).toBe(1);
 });

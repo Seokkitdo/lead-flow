@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Badge, Button, Field, EmptyState, Icon } from '@leadflow/ui';
+  import { Badge, Button, Field, EmptyState, Icon, TableCellLink } from '@leadflow/ui';
   import { statuses } from '@leadflow/api-client';
   let { onclose }: { onclose: () => void } = $props();
 </script>
@@ -8,7 +8,7 @@
   <header class="design-header">
     <a href="/" class="brand"><span class="brand-mark">L</span>LeadFlow.</a><Button
       variant="secondary"
-      onclick={onclose}>워크스페이스로 돌아가기</Button
+      onclick={onclose}>업무 공간로 돌아가기</Button
     >
   </header>
   <span class="eyebrow">LEADFLOW DESIGN SYSTEM · 01</span>
@@ -31,7 +31,7 @@
       <h1>고객과 다음 기회를 연결하세요.</h1>
       <h2>명확한 다음 단계가 보이는 업무 공간</h2>
       <p>정보는 차분하게, 중요한 행동은 명확하게 전달합니다.</p>
-      <small>보조 정보 · 한국 표준시(KST) · 14px</small>
+      <small>보조 정보 · 한국 시간 · 14px</small>
     </div>
   </section>
   <section class="panel design-section">
@@ -50,13 +50,50 @@
     <div class="form-grid">
       <Field label="고객 이름 *" hint="고객이 사용하는 이름을 입력하세요."
         ><input placeholder="이름 입력" /></Field
-      ><Field label="현재 상태"
+      ><Field label="상담 상태"
         ><select><option>신규</option><option>상담 진행 중</option></select></Field
       >
     </div>
     <p class="alert success" role="status">업무 기록을 저장했습니다.</p>
     <p class="alert error">입력 내용을 확인해 주세요. 필수 항목이 비어 있습니다.</p>
     <EmptyState />
+  </section>
+  <section class="panel panel-content">
+    <div class="section-heading"><h2>상세 본문과 업무 요약</h2></div>
+    <p>본문 여백은 데스크톱 24px, 작은 화면 16px이며 영역 간 간격은 24px입니다.</p>
+    <dl class="summary-grid">
+      <div>
+        <dt>전체 담당 고객</dt>
+        <dd>12명</dd>
+      </div>
+      <div>
+        <dt>재통화 예정</dt>
+        <dd>3명</dd>
+      </div>
+      <div>
+        <dt>상담 완료</dt>
+        <dd>4명</dd>
+      </div>
+    </dl>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>이름</th><th>직원 상태</th><th>담당 고객</th></tr></thead>
+        <tbody
+          ><tr>
+            <TableCellLink href="/team" label="합성 직원 상세 예시" primary>합성 직원</TableCellLink
+            >
+            <TableCellLink href="/team" label="합성 직원 상세 · 직원 상태"
+              ><Badge tone="COMPLETED">재직</Badge></TableCellLink
+            >
+            <TableCellLink href="/team" label="합성 직원 상세 · 담당 고객">12명</TableCellLink>
+          </tr></tbody
+        >
+      </table>
+    </div>
+    <p class="field-hint">
+      각 셀 전체가 링크입니다. Tab으로 주 링크에 접근하고 Enter로 이동합니다. 우클릭과 새 탭 열기를
+      지원합니다.
+    </p>
   </section>
   <section class="panel design-section">
     <span class="eyebrow">03 / PRINCIPLES</span>
@@ -68,7 +105,7 @@
       </div>
       <div>
         <strong>정보와 행동을 구분합니다</strong>
-        <p>현재 상태는 배지로, 업무 활동은 누적된 기록으로 표현합니다.</p>
+        <p>상담 상태는 배지로, 업무 활동은 누적된 기록으로 표현합니다.</p>
       </div>
       <div>
         <strong>누구나 편하게 사용합니다</strong>

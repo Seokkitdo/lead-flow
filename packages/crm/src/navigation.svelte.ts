@@ -27,7 +27,7 @@ export function parseRoute(path: string): Route {
       leads: 'leads',
       assignments: 'assign',
       team: 'team',
-      'design-system': 'design',
+      'design-system': import.meta.env.DEV ? 'design' : 'missing',
       login: 'login',
       callbacks: 'callbacks',
       account: 'account',

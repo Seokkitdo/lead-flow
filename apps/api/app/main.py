@@ -88,7 +88,7 @@ def commit(db):
         db.commit()
     except StaleDataError:
         db.rollback()
-        raise HTTPException(409, "고객 정보가 변경되었습니다. 새로고침 후 다시 시도해 주세요.")
+        raise HTTPException(409, "고객 정보가 변경되어 저장하지 못했습니다. 최신 정보를 불러온 뒤 다시 입력해 주세요.")
     except IntegrityError:
         db.rollback()
         raise HTTPException(409, "이미 사용 중인 값입니다.")
@@ -109,13 +109,13 @@ def current_user(request: Request, db: DBSession = Depends(db_session)):
         raise HTTPException(401, "로그인이 필요합니다.")
     user = db.get(User, session.user_id)
     if not user or user.status != "ACTIVE":
-        raise HTTPException(401, "사용할 수 없는 계정입니다.")
+        raise HTTPException(401, "로그인할 수 없는 계정입니다. 관리자에게 문의해 주세요.")
     return user
 
 
 def admin(user=Depends(current_user)):
     if user.role != "ADMIN":
-        raise HTTPException(403, "관리자 권한이 필요합니다.")
+        raise HTTPException(403, "관리자만 사용할 수 있는 기능입니다.")
     return user
 
 
@@ -222,7 +222,7 @@ def get_lead(lead_id, user, db):
 
 def guard_version(lead, version):
     if lead.version != version:
-        raise HTTPException(409, "고객 정보가 변경되었습니다. 새로고침 후 다시 시도해 주세요.")
+        raise HTTPException(409, "고객 정보가 변경되어 저장하지 못했습니다. 최신 정보를 불러온 뒤 다시 입력해 주세요.")
 
 
 def normalize(phone):
@@ -262,7 +262,7 @@ def login(body: Login, request: Request, response: Response, db: DBSession = Dep
         while bucket and bucket[0] < time.monotonic() - 300:
             bucket.popleft()
         if len(bucket) >= 10:
-            raise HTTPException(429, "잠시 후 다시 로그인해 주세요.")
+            raise HTTPException(429, "로그인 시도가 많습니다. 잠시 후 다시 로그인해 주세요.")
         bucket.append(time.monotonic())
     user = db.scalar(select(User).where(User.login_id == body.login_id))
     valid = passwords.verify(body.password, user.password_hash if user else dummy_hash)
@@ -322,7 +322,7 @@ def patch_account(
         select(User).where(User.id == actor.id).with_for_update().execution_options(populate_existing=True)
     )
     if user.status != "ACTIVE":
-        raise HTTPException(401, "사용할 수 없는 계정입니다.")
+        raise HTTPException(401, "로그인할 수 없는 계정입니다. 관리자에게 문의해 주세요.")
     if body.version != account_version(user):
         raise HTTPException(409, "계정 정보가 변경되었습니다. 최신 정보를 불러와 주세요.")
     if not passwords.verify(body.current_password, user.password_hash):
@@ -353,7 +353,7 @@ def create_user(body: UserCreate, actor=Depends(admin), db: DBSession = Depends(
         db.flush()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(409, "이미 사용 중인 로그인 ID입니다.")
+        raise HTTPException(409, "이미 사용 중인 로그인 아이디입니다.")
     db.add(
         UserAudit(
             user_id=user.id, actor_id=actor.id, changes=json.dumps({"created": data}, ensure_ascii=False)
@@ -372,11 +372,11 @@ def patch_user(user_id: str, body: UserPatch, actor=Depends(admin), db: DBSessio
         raise HTTPException(404, "직원을 찾을 수 없습니다.")
     data = body.model_dump(exclude_unset=True)
     if any(data.get(k) is None for k in ["name", "role", "status", "password"] if k in data):
-        raise HTTPException(422, "필수 값은 비울 수 없습니다.")
+        raise HTTPException(422, "필수 항목을 입력해 주세요.")
     if actor.id == user_id and (
         data.get("role", "ADMIN") != "ADMIN" or data.get("status", "ACTIVE") != "ACTIVE"
     ):
-        raise HTTPException(409, "현재 로그인한 관리자는 비활성화하거나 강등할 수 없습니다.")
+        raise HTTPException(409, "본인 계정은 이용 중지·퇴사로 변경하거나 직원 계정으로 바꿀 수 없습니다.")
     audit = {}
     for key, value in data.items():
         if key == "password":
@@ -402,6 +402,7 @@ def leads(
     assignment: str | None = None,
     work_pending: bool | None = None,
     callback_window: Literal["today", "overdue", "upcoming", "all"] | None = None,
+    after_id: str | None = None,
     acquired_from: date | None = None,
     acquired_to: date | None = None,
     page: int = Query(1, ge=1),
@@ -458,6 +459,24 @@ def leads(
                 acquired_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone(timedelta(hours=9))
             ).astimezone(UTC)
         )
+    if after_id:
+        previous = get_lead(after_id, user, db)
+        if callback_window:
+            if previous.callback_at is None:
+                raise HTTPException(422, "재통화 일정이 없는 고객입니다.")
+            query = query.where(
+                or_(
+                    Lead.callback_at > previous.callback_at,
+                    (Lead.callback_at == previous.callback_at) & (Lead.id > previous.id),
+                )
+            )
+        else:
+            query = query.where(
+                or_(
+                    Lead.acquired_at < previous.acquired_at,
+                    (Lead.acquired_at == previous.acquired_at) & (Lead.id > previous.id),
+                )
+            )
     total = db.scalar(select(func.count()).select_from(query.subquery()))
     items = db.scalars(
         query.order_by(Lead.callback_at if callback_window else Lead.acquired_at.desc(), Lead.id)
@@ -483,10 +502,18 @@ def leads(
 def create_lead(body: LeadCreate, user=Depends(admin), db: DBSession = Depends(db_session)):
     normalized = normalize(body.phone)
     duplicates(normalized, body.allow_duplicate, db)
-    data = body.model_dump(exclude={"allow_duplicate"}, exclude_none=True)
+    data = body.model_dump(exclude={"allow_duplicate", "assignee_id"}, exclude_none=True)
     lead = Lead(**data, normalized_phone=normalized, created_by=user.id)
     db.add(lead)
-    commit(db)
+    if body.assignee_id:
+        db.flush()
+        assign_many(
+            BulkAssign(lead_ids=[lead.id], user_ids=[body.assignee_id], reason="고객 등록 시 담당자 지정"),
+            user,
+            db,
+        )
+    else:
+        commit(db)
     return lead_json(lead, db)
 
 
@@ -505,7 +532,7 @@ def assign_many(body, actor, db):
     }
     targets = [target_map.get(uid) for uid in user_ids]
     if any(u is None or u.status != "ACTIVE" or u.role != "USER" for u in targets):
-        raise HTTPException(422, "활성 직원에게만 배분할 수 있습니다.")
+        raise HTTPException(422, "재직 중이며 이용 가능한 직원에게만 배정할 수 있습니다.")
     # Stable lock ordering avoids deadlocks for overlapping bulk assignments.
     lead_map = {
         lead.id: lead
@@ -517,7 +544,7 @@ def assign_many(body, actor, db):
         )
     }
     if len(lead_map) != len(lead_ids):
-        raise HTTPException(404, "일부 고객을 찾을 수 없습니다.")
+        raise HTTPException(404, "선택한 고객 중 더 이상 조회할 수 없는 고객이 있습니다. 목록을 새로고침한 뒤 다시 선택해 주세요.")
     for index, lid in enumerate(lead_ids):
         lead = lead_map[lid]
         target = targets[index % len(targets)]
@@ -593,7 +620,7 @@ def patch_lead(lead_id: str, body: LeadPatch, user=Depends(admin), db: DBSession
     guard_version(lead, body.version)
     data = body.model_dump(exclude_unset=True, exclude={"version", "allow_duplicate"})
     if any(data.get(k) is None for k in ["name", "phone", "acquired_at"] if k in data):
-        raise HTTPException(422, "필수 값은 비울 수 없습니다.")
+        raise HTTPException(422, "필수 항목을 입력해 주세요.")
     if "phone" in data:
         normalized = normalize(data["phone"])
         duplicates(normalized, body.allow_duplicate, db, lead.id)
@@ -619,9 +646,9 @@ def add_activity(lead_id, body, user, db):
     status = body.status or lead.current_status
     callback = body.callback_at if body.callback_at is not None else lead.callback_at
     if status == "CALLBACK" and callback is None:
-        raise HTTPException(422, "재통화 일시가 필요합니다.")
+        raise HTTPException(422, "다시 연락할 날짜와 시간을 입력해 주세요.")
     if body.callback_at and status != "CALLBACK":
-        raise HTTPException(422, "재통화 예정 상태에서 일시를 입력해 주세요.")
+        raise HTTPException(422, "재통화 날짜와 시간을 저장하려면 상담 상태를 재통화 예정으로 선택해 주세요.")
     activity = Activity(
         lead_id=lead.id,
         user_id=user.id,
@@ -659,7 +686,7 @@ def correct_activity(
     if not original or original.lead_id != lead_id:
         raise HTTPException(404, "업무 기록을 찾을 수 없습니다.")
     if not body.reason.strip() or (body.kind == "CORRECTION" and not body.memo.strip()):
-        raise HTTPException(422, "사유와 정정 내용을 입력해 주세요.")
+        raise HTTPException(422, "이유와 바로잡을 내용을 입력해 주세요.")
     label = "정정" if body.kind == "CORRECTION" else "취소"
     return add_activity(
         lead_id,
@@ -705,6 +732,13 @@ def dashboard(user=Depends(current_user), db: DBSession = Depends(db_session)):
     }
     staff = []
     if user.role == "ADMIN":
+        pending_counts = dict(
+            db.execute(
+                select(Lead.assignee_id, func.count(Lead.id))
+                .where(Lead.deleted_at.is_(None), assignment_pending())
+                .group_by(Lead.assignee_id)
+            ).all()
+        )
         for employee in db.scalars(select(User).order_by(User.name)):
             assigned = [x for x in rows if x.assignee_id == employee.id]
             staff.append(
@@ -714,6 +748,7 @@ def dashboard(user=Depends(current_user), db: DBSession = Depends(db_session)):
                     "total": len(assigned),
                     "completed": sum(x.current_status == "COMPLETED" for x in assigned),
                     "callback": sum(x.current_status == "CALLBACK" for x in assigned),
+                    "pending": pending_counts.get(employee.id, 0),
                 }
             )
     return {

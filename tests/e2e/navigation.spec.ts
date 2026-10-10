@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 const ADMIN = 'http://127.0.0.1:4174';
 async function login(page: Page, path = '/') {
   await page.goto(ADMIN + path);
-  await page.getByLabel('로그인 ID', { exact: true }).fill('e2e-admin');
+  await page.getByLabel('로그인 아이디', { exact: true }).fill('e2e-admin');
   await page.getByLabel('비밀번호', { exact: true }).fill('e2e-only-admin-password');
   await page.getByRole('button', { name: '로그인', exact: true }).click();
   await expect(page.getByRole('navigation', { name: '주 메뉴' })).toBeVisible();
@@ -31,17 +31,17 @@ test('메뉴·상세 탭·수정은 URL로 이동하고 새로고침과 뒤로 �
   const lead = await customer(page, '합성라우팅고객');
   await page.reload();
   await expect(page).toHaveURL(ADMIN + '/leads?status=NEW');
-  await expect(page.getByLabel('업무 상태 필터')).toHaveValue('NEW');
+  await expect(page.getByLabel('상담 상태 필터')).toHaveValue('NEW');
   await page.getByLabel('고객 검색').fill('합성라우팅고객');
   await expect(page.getByRole('row').filter({ hasText: '합성라우팅고객' })).toHaveCount(1);
   const filtered = page.url();
   await page.getByRole('link', { name: '합성라우팅고객 010' }).click();
   await expect(page).toHaveURL(new RegExp(`/leads/${lead.id}\\?`));
   await expect(page.getByRole('heading', { name: '고객 상세', exact: true })).toBeFocused();
-  await page.getByRole('link', { name: /전체 타임라인/ }).click();
+  await page.getByRole('link', { name: /전체 기록/ }).click();
   await expect(page).toHaveURL(new RegExp(`/leads/${lead.id}/timeline`));
   await page.reload();
-  await expect(page.getByRole('link', { name: /전체 타임라인/ })).toHaveAttribute(
+  await expect(page.getByRole('link', { name: /전체 기록/ })).toHaveAttribute(
     'aria-current',
     'page',
   );
@@ -60,7 +60,7 @@ test('메뉴·상세 탭·수정은 URL로 이동하고 새로고침과 뒤로 �
   page.once('dialog', (dialog) => dialog.dismiss());
   await page
     .getByRole('navigation', { name: '주 메뉴' })
-    .getByRole('link', { name: '대시보드' })
+    .getByRole('link', { name: '업무 현황' })
     .click();
   await expect(page).toHaveURL(new RegExp('/edit'));
   await expect(page.getByLabel('이름 *', { exact: true })).toHaveValue('합성수정고객');
@@ -87,9 +87,9 @@ test('메뉴·상세 탭·수정은 URL로 이동하고 새로고침과 뒤로 �
   await page.getByRole('link', { name: '직원 목록으로' }).click();
   await page
     .getByRole('navigation', { name: '주 메뉴' })
-    .getByRole('link', { name: '대시보드' })
+    .getByRole('link', { name: '업무 현황' })
     .click();
-  await page.getByRole('link', { name: /재통화 예정.*다음 연락/ }).click();
+  await page.getByRole('link', { name: /재통화 예정.*다시 연락/ }).click();
   await expect(page).toHaveURL(ADMIN + '/callbacks?window=all');
   await expect(page.getByRole('link', { name: '전체', exact: true })).toHaveAttribute(
     'aria-current',
@@ -115,7 +115,7 @@ test('조회 오류와 저장 오류를 구분하고 입력 보존·중복 제�
   await page.getByRole('button', { name: '다시 시도' }).click();
   await expect(page.getByRole('row').filter({ hasText: 'e2e-admin' })).toBeVisible();
   await page.goto(`${ADMIN}/leads/${lead.id}`);
-  await page.getByLabel('현재 상태').selectOption('CALLBACK');
+  await page.getByLabel('상담 상태').selectOption('CALLBACK');
   await page.getByLabel('재통화 일시').fill('2030-10-01T15:00');
   await page.getByLabel('업무 메모').fill('실패 후에도 보존할 합성 메모');
   let attempts = 0;
@@ -131,13 +131,13 @@ test('조회 오류와 저장 오류를 구분하고 입력 보존·중복 제�
   await expect(page.getByRole('button', { name: '저장 중…' })).toBeDisabled();
   await page
     .getByRole('navigation', { name: '주 메뉴' })
-    .getByRole('link', { name: '대시보드' })
+    .getByRole('link', { name: '업무 현황' })
     .click();
   await expect(page).toHaveURL(`${ADMIN}/leads/${lead.id}`);
   release();
   await expect(page.getByRole('alert')).toContainText('저장 테스트 오류');
   await expect(page.getByLabel('업무 메모')).toHaveValue('실패 후에도 보존할 합성 메모');
-  await expect(page.getByLabel('현재 상태')).toHaveValue('CALLBACK');
+  await expect(page.getByLabel('상담 상태')).toHaveValue('CALLBACK');
   await expect(page.getByLabel('재통화 일시')).toHaveValue('2030-10-01T15:00');
   expect(attempts).toBe(1);
   await page.unroute('**/api/leads/*/activities');
@@ -154,7 +154,7 @@ test('조회 오류와 저장 오류를 구분하고 입력 보존·중복 제�
   await expect(page.getByLabel('업무 메모')).toHaveValue('실패 후에도 보존할 합성 메모');
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: '최신 정보 불러오기' }).click();
-  await expect(page.getByLabel('현재 상태')).toHaveValue('HOLD');
+  await expect(page.getByLabel('상담 상태')).toHaveValue('HOLD');
   await expect(page.getByLabel('업무 메모')).toHaveValue('');
   await page.getByLabel('업무 메모').fill('충돌 확인 후 새 업무 기록');
   await page.getByRole('button', { name: '업무 기록 저장' }).click();
@@ -171,7 +171,7 @@ test('인증 확인 실패는 재시도하고 세션 만료 후 원래 상세 �
   await page.unroute('**/api/auth/me');
   await page.getByRole('button', { name: '다시 시도' }).click();
   await expect(page).toHaveURL(/\/login\?next=/);
-  await page.getByLabel('로그인 ID', { exact: true }).fill('e2e-admin');
+  await page.getByLabel('로그인 아이디', { exact: true }).fill('e2e-admin');
   await page.getByLabel('비밀번호', { exact: true }).fill('e2e-only-admin-password');
   await page.getByRole('button', { name: '로그인', exact: true }).click();
   await expect(page).toHaveURL(ADMIN + '/leads');
@@ -181,8 +181,8 @@ test('인증 확인 실패는 재시도하고 세션 만료 후 원래 상세 �
   expect((await page.request.post(ADMIN + '/api/auth/logout', { data: {} })).ok()).toBeTruthy();
   await page.getByRole('button', { name: '업무 기록 저장' }).click();
   await expect(page).toHaveURL(/\/login\?next=/);
-  await expect(page.getByRole('alert')).toContainText('세션이 만료되었습니다');
-  await page.getByLabel('로그인 ID', { exact: true }).fill('e2e-admin');
+  await expect(page.getByRole('alert')).toContainText('로그인이 만료되었습니다');
+  await page.getByLabel('로그인 아이디', { exact: true }).fill('e2e-admin');
   await page.getByLabel('비밀번호', { exact: true }).fill('e2e-only-admin-password');
   await page.getByRole('button', { name: '로그인', exact: true }).click();
   await expect(page).toHaveURL(`${ADMIN}/leads/${lead.id}/activity`);

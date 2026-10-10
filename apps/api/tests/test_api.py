@@ -161,7 +161,7 @@ def test_bulk_atomic_balance(setup):
     body = {
         "lead_ids": [x["id"] for x in leads],
         "user_ids": [ids["staff"], ids["other"]],
-        "reason": "균등 배분",
+        "reason": "균등 배정",
     }
     assert (
         c["admin"]
@@ -533,3 +533,154 @@ def test_correction_preserves_original_and_enforces_scope_version(setup):
     assert original in cancelled.json()["timeline"]
     with factory() as db:
         assert len(db.scalars(select(Activity).where(Activity.lead_id == lead["id"])).all()) == 3
+
+
+def test_lead_registration_and_edit_validation(setup):
+    clients, _, _ = setup
+    admin = clients["admin"]
+    lead = create(admin, name="  합성 검증 고객  ")
+    assert lead["name"] == "합성 검증 고객"
+    for invalid in [
+        {"name": "   "},
+        {"phone": "010-1234"},
+        {"phone": "abc01012345678"},
+        {"phone": "010123456789"},
+        {"source_detail": "x" * 256},
+        {"initial_memo": "x" * 10001},
+    ]:
+        response = admin.post(
+            "/api/leads",
+            json={"name": "합성 고객", "phone": "01000001234", **invalid},
+        )
+        assert response.status_code == 422
+        response = admin.patch(f"/api/leads/{lead['id']}", json={"version": lead["version"], **invalid})
+        assert response.status_code == 422
+    unchanged = admin.get(f"/api/leads/{lead['id']}").json()
+    assert unchanged["version"] == lead["version"]
+    for phone in ["02-123-4567", "02-1234-5678", "031-123-4567", "070-1234-5678", "1588-0000"]:
+        assert admin.post("/api/leads", json={"name": "합성 번호 검증", "phone": phone}).status_code == 201
+
+
+def test_registration_assignment_is_atomic_and_workload_is_current(setup):
+    clients, ids, factory = setup
+    admin = clients["admin"]
+    for target in [ids["admin"], "missing-user"]:
+        response = admin.post(
+            "/api/leads",
+            json={
+                "name": "합성 등록 실패",
+                "phone": "01000008001",
+                "assignee_id": target,
+            },
+        )
+        assert response.status_code == 422
+        assert admin.get("/api/leads").json()["total"] == 0
+        with factory() as db:
+            assert db.scalars(select(Assignment)).all() == []
+    lead = create(admin, "8001", assignee_id=ids["staff"])
+    assert lead["assignee_id"] == ids["staff"]
+    assert lead["assignment_pending"] is True
+    history = admin.get(f"/api/leads/{lead['id']}/assignments").json()
+    assert len(history) == 1
+    assert history[0]["assignee_name"] == "staff"
+    stats = admin.get("/api/dashboard").json()["staff"]
+    assert next(x for x in stats if x["id"] == ids["staff"])["pending"] == 1
+    assert (
+        clients["staff"]
+        .post(
+            f"/api/leads/{lead['id']}/activities",
+            json={
+                "version": lead["version"],
+                "activity_type": "CALL_NO_ANSWER",
+                "status": "CONTACTING",
+            },
+        )
+        .status_code
+        == 201
+    )
+    stats = admin.get("/api/dashboard").json()["staff"]
+    assert next(x for x in stats if x["id"] == ids["staff"])["pending"] == 0
+    assert admin.patch(f"/api/users/{ids['other']}", json={"status": "INACTIVE"}).status_code == 200
+    assert (
+        admin.post(
+            "/api/leads",
+            json={
+                "name": "합성 이용 중지",
+                "phone": "01000008002",
+                "assignee_id": ids["other"],
+            },
+        ).status_code
+        == 422
+    )
+    assert admin.get("/api/leads").json()["total"] == 1
+
+
+def test_next_customer_preserves_filters_order_and_scope(setup):
+    clients, ids, _ = setup
+    admin, staff = clients["admin"], clients["staff"]
+    leads = [
+        create(admin, f"81{i:02d}", assignee_id=ids["staff"], acquired_at=f"2026-10-{10 + i:02d}T00:00:00Z")
+        for i in range(3)
+    ]
+    foreign = create(admin, "8199", assignee_id=ids["other"])
+    assert staff.get("/api/leads", params={"after_id": foreign["id"]}).status_code == 404
+    response = staff.get(
+        "/api/leads",
+        params={
+            "after_id": leads[2]["id"],
+            "work_pending": True,
+            "page_size": 1,
+        },
+    ).json()
+    assert [x["id"] for x in response["items"]] == [leads[1]["id"]]
+    staff.post(
+        f"/api/leads/{leads[2]['id']}/activities",
+        json={
+            "version": leads[2]["version"],
+            "activity_type": "MEMO",
+        },
+    )
+    assert (
+        staff.get(
+            "/api/leads",
+            params={
+                "after_id": leads[2]["id"],
+                "work_pending": True,
+                "page_size": 1,
+            },
+        ).json()["items"][0]["id"]
+        == leads[1]["id"]
+    )
+    assert staff.get("/api/leads", params={"after_id": leads[0]["id"]}).json()["items"] == []
+    assert (
+        staff.get(
+            "/api/leads",
+            params={
+                "after_id": leads[2]["id"],
+                "search": "일치하지 않는 합성 고객",
+            },
+        ).json()["items"]
+        == []
+    )
+    for index, lead in enumerate(leads):
+        current = staff.get(f"/api/leads/{lead['id']}").json()
+        staff.post(
+            f"/api/leads/{lead['id']}/activities",
+            json={
+                "version": current["version"],
+                "activity_type": "CALL_CONNECTED",
+                "status": "CALLBACK",
+                "callback_at": f"2030-01-{index + 1:02d}T00:00:00Z",
+            },
+        )
+    assert (
+        staff.get(
+            "/api/leads",
+            params={
+                "after_id": leads[0]["id"],
+                "callback_window": "all",
+                "page_size": 1,
+            },
+        ).json()["items"][0]["id"]
+        == leads[1]["id"]
+    )

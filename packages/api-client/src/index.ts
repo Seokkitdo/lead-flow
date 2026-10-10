@@ -21,14 +21,14 @@ export const sources = {
   NAVER: '네이버',
   KAKAO: '카카오',
   HOMEPAGE: '홈페이지',
-  FORM: '폼',
+  FORM: '신청서',
   PHONE: '전화',
   REFERRAL: '소개',
   ETC: '기타',
 } as const;
 export const activities = {
   CALL_ATTEMPT: '전화 시도',
-  CALL_NO_ANSWER: '전화 부재',
+  CALL_NO_ANSWER: '전화 안 받음',
   CALL_CONNECTED: '전화 연결',
   KAKAO_SENT: '카카오톡 전달 기록',
   CONSULTATION: '상담 진행',
@@ -78,7 +78,14 @@ export type Dashboard = {
   callback: number;
   completed: number;
   status_counts: Record<string, number>;
-  staff: { id: string; name: string; total: number; completed: number; callback: number }[];
+  staff: {
+    id: string;
+    name: string;
+    total: number;
+    completed: number;
+    callback: number;
+    pending: number;
+  }[];
 };
 export class ApiError extends Error {
   constructor(
@@ -89,9 +96,9 @@ export class ApiError extends Error {
       typeof detail === 'string'
         ? detail
         : status === 409
-          ? '다른 변경 사항이 있습니다. 최신 내용을 확인해 주세요.'
+          ? '정보가 변경되어 저장하지 못했습니다. 최신 정보를 확인한 뒤 다시 저장해 주세요.'
           : status === 422
-            ? '입력 내용을 확인해 주세요.'
+            ? '필수 항목과 입력한 값을 확인해 주세요.'
             : status === 401
               ? '로그인이 필요합니다.'
               : '요청을 처리하지 못했습니다. 다시 시도해 주세요.',
@@ -108,7 +115,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
-    throw new ApiError(0, '서버에 연결하지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요.');
+    throw new ApiError(0, '연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.');
   }
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: '서버에 연결하지 못했습니다.' }));

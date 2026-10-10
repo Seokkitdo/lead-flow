@@ -43,7 +43,7 @@
     error = '';
     success = '';
     if (password !== confirmation) {
-      error = '새 비밀번호 확인이 일치하지 않습니다.';
+      error = '새 비밀번호와 확인란에 입력한 비밀번호가 다릅니다. 다시 확인해 주세요.';
       return;
     }
     pending = true;
@@ -78,7 +78,7 @@
   }
 </script>
 
-{#if account.isPending}<AsyncState loading message="계정 정보를 불러오고 있어요…" />
+{#if account.isPending}<AsyncState loading message="계정 정보를 불러오는 중…" />
 {:else if account.isError}<AsyncState
     message={account.error.message}
     retry={() => account.refetch()}
@@ -86,9 +86,7 @@
 {:else if account.data}<section class="panel editor-page">
     <h2>{account.data.name}</h2>
     <p>{account.data.login_id} · {account.data.role === 'ADMIN' ? '관리자' : '직원'}</p>
-    <p>
-      비밀번호를 변경하면 모든 기기의 로그인 세션이 종료됩니다. 새 비밀번호로 다시 로그인해 주세요.
-    </p>
+    <p>비밀번호를 변경하면 모든 기기에서 로그아웃됩니다. 새 비밀번호로 다시 로그인해 주세요.</p>
     {#if error}<p class="alert error" role="alert">{error}</p>{/if}
     {#if conflict}<Button variant="secondary" onclick={reload}>최신 계정 정보 불러오기</Button>{/if}
     {#if success}<p class="alert success" role="status">{success}</p>{/if}
@@ -104,9 +102,10 @@
         <Field label="연락처"
           ><input type="tel" bind:value={phone} maxlength="30" autocomplete="tel" /></Field
         >
-        <Field label="현재 비밀번호 *"
+        <Field label="현재 비밀번호 *" hint="본인 확인을 위해 입력해 주세요."
           ><input
             type="password"
+            aria-label="현재 비밀번호 *"
             bind:value={currentPassword}
             required
             maxlength="128"

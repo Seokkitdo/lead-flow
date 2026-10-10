@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -45,7 +46,33 @@ class UserPatch(Input):
     status: Literal["ACTIVE", "INACTIVE", "DEPARTED"] | None = None
 
 
-class LeadCreate(Input):
+class LeadInput(Input):
+    @field_validator("name", mode="before", check_fields=False)
+    @classmethod
+    def clean_name(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError("고객 이름을 입력해 주세요.")
+        return value
+
+    @field_validator("phone", mode="after", check_fields=False)
+    @classmethod
+    def check_phone(cls, value):
+        if value is None:
+            return value
+        value = value.strip()
+        compact = re.sub(r"[\s-]", "", value)
+        pattern = (
+            r"(?:02[0-9]{7,8}|01[016789][0-9]{7,8}|0[3-6][0-9]{8}|"
+            r"070[0-9]{8}|080[0-9]{7}|1[0-9]{7}|\+[1-9][0-9]{7,14})"
+        )
+        if not re.fullmatch(r"\+?[0-9][0-9\s-]*", value) or not re.fullmatch(pattern, compact):
+            raise ValueError("연락처를 확인해 주세요. 예: 010-1234-5678")
+        return value
+
+
+class LeadCreate(LeadInput):
     name: str = Field(min_length=1, max_length=100)
     phone: str = Field(min_length=7, max_length=30)
     source: Source | None = None
@@ -53,9 +80,10 @@ class LeadCreate(Input):
     initial_memo: str | None = Field(default=None, max_length=10000)
     acquired_at: datetime | None = None
     allow_duplicate: bool = False
+    assignee_id: str | None = None
 
 
-class LeadPatch(Input):
+class LeadPatch(LeadInput):
     version: int = Field(ge=1)
     name: str | None = Field(default=None, min_length=1, max_length=100)
     phone: str | None = Field(default=None, min_length=7, max_length=30)

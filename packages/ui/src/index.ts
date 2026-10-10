@@ -5,3 +5,5 @@ export { default as EmptyState } from './EmptyState.svelte';
 export { default as Icon } from './Icon.svelte';
 export { modalFocus } from './focus';
 export { default as AsyncState } from './AsyncState.svelte';
+
+export { default as TableCellLink } from './TableCellLink.svelte';

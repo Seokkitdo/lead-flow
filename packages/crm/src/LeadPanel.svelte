@@ -15,6 +15,7 @@
   } from '@leadflow/api-client';
   import { Badge, Button, Field, Icon, AsyncState } from '@leadflow/ui';
   import { protectChanges, useNavigation } from './navigation.svelte';
+  import { nextCustomer } from './next-customer';
   const navigation = useNavigation();
   let {
     id,
@@ -28,6 +29,7 @@
     onclose,
     onedit,
     onrefresh,
+    listReturn,
   }: {
     id: string;
     tab: string;
@@ -40,8 +42,9 @@
     onclose: () => void;
     onedit: (lead: Lead) => void;
     onrefresh: () => Promise<void>;
+    listReturn: string;
   } = $props();
-  let activity = $state('CALL_CONNECTED'),
+  let activity = $state('MEMO'),
     memo = $state(''),
     status = $state(''),
     callback = $state(''),
@@ -53,6 +56,24 @@
     success = $state(''),
     dirty = $state(false),
     conflict = $state(false);
+  let suggestion = $state('');
+  let manualStatus = $state(false);
+  function chooseActivity(value: string) {
+    activity = value;
+    dirty = true;
+    suggestion = '';
+    if (manualStatus || !['NEW', 'CONTACTING', 'IN_PROGRESS'].includes(status)) return;
+    const next =
+      value === 'CONSULTATION'
+        ? 'IN_PROGRESS'
+        : status === 'NEW' && ['CALL_ATTEMPT', 'CALL_NO_ANSWER', 'CALL_CONNECTED'].includes(value)
+          ? 'CONTACTING'
+          : status;
+    if (next !== status) {
+      status = next;
+      suggestion = `연락 결과에 맞춰 '${statuses[next as keyof typeof statuses]}'으로 제안했습니다. 저장 전에 변경할 수 있습니다.`;
+    }
+  }
   protectChanges(() => (pending ? 'pending' : dirty ? 'dirty' : null));
   const lead = createQuery(() => ({
     queryKey: ['lead', id],
@@ -68,6 +89,10 @@
   });
   $effect(() => {
     id;
+    dirty = false;
+    activity = 'MEMO';
+    manualStatus = false;
+    suggestion = '';
     memo = '';
     error = '';
     success = '';
@@ -75,12 +100,14 @@
   });
   async function save(e: SubmitEvent) {
     e.preventDefault();
+    const goNext = (e.submitter as HTMLButtonElement | null)?.value === 'next';
     const returnToList = (e.submitter as HTMLButtonElement | null)?.value === 'return';
     if (pending || conflict) return;
     pending = true;
     error = '';
     success = '';
     try {
+      const nextId = goNext ? await nextCustomer(id, listReturn) : null;
       await api(
         `/leads/${id}/activities`,
         body('POST', {
@@ -93,9 +120,17 @@
       );
       dirty = false;
       memo = '';
+      suggestion = '';
       success = '업무 기록을 저장했습니다.';
       await onrefresh();
-      if (returnToList) onclose();
+      if (goNext && nextId) {
+        navigation.go(`/leads/${nextId}?from=${encodeURIComponent(listReturn)}`, {
+          replace: true,
+          force: true,
+        });
+      } else if (goNext) {
+        success = '업무 기록을 저장했습니다. 이 목록의 마지막 고객입니다.';
+      } else if (returnToList) onclose();
     } catch (e) {
       error = (e as Error).message;
       conflict = e instanceof ApiError && e.status === 409;
@@ -147,7 +182,7 @@
           <div class="timeline-heading">
             <strong
               >{event.kind === 'ASSIGNMENT'
-                ? '담당자 배분'
+                ? '담당자 배정'
                 : event.activity_type
                   ? activities[event.activity_type]
                   : '업무 기록'}</strong
@@ -157,7 +192,7 @@
               class="text-button"
               id={`record-${event.id}`}
               href={`/leads/${id}/records/${event.id}?from=${encodeURIComponent(navigation.url.searchParams.get('from') || '/leads')}`}
-              >기록 상세·정정</a
+              >기록 상세</a
             >{/if}
           <small
             >{event.actor_name}{event.kind === 'ASSIGNMENT'
@@ -172,7 +207,7 @@
             </p>{/if}
         </div>
       </article>{:else}<p class="muted">
-        아직 기록된 활동이 없습니다. 첫 업무 기록을 남겨 보세요.
+        아직 업무 기록이 없습니다. 연락 결과나 메모를 남겨 주세요.
       </p>{/each}
   </div>
 {/snippet}
@@ -180,7 +215,7 @@
 <section class="panel detail-page" aria-label="고객 상세">
   {#if lead.isPending}<AsyncState
       loading
-      message="고객 정보를 불러오고 있어요…"
+      message="고객 정보를 불러오는 중…"
     />{:else if lead.isError}<div class="alert error" role="alert">
       {lead.error.message}<Button variant="secondary" onclick={() => lead.refetch()}
         >다시 시도</Button
@@ -199,7 +234,7 @@
       </div>
       <dl class="detail-grid">
         <div>
-          <dt>유입 경로</dt>
+          <dt>문의 경로</dt>
           <dd>
             {customer.source ? sources[customer.source] : '—'}{customer.source_detail
               ? ` · ${customer.source_detail}`
@@ -208,18 +243,18 @@
         </div>
         <div>
           <dt>담당자</dt>
-          <dd>{customer.assignee_name || '미배분'}</dd>
+          <dd>{customer.assignee_name || '담당자 미지정'}</dd>
         </div>
         <div>
-          <dt>유입일</dt>
+          <dt>문의일</dt>
           <dd>{date(customer.acquired_at, true)}</dd>
         </div>
         <div>
-          <dt>시스템 등록일</dt>
+          <dt>등록일</dt>
           <dd>{date(customer.created_at, true)}</dd>
         </div>
         <div>
-          <dt>현재 담당자 배분일</dt>
+          <dt>담당자 지정일</dt>
           <dd>{date(customer.assigned_at, true)}</dd>
         </div>
         <div>
@@ -228,12 +263,15 @@
         </div>
       </dl>
       {#if customer.assignment_pending}<p class="field-hint">
-          배분 후 미처리 · 현재 담당자가 이번 배분 이후 아직 업무 기록을 남기지 않았습니다.
+          배정 후 기록 없음 · 현재 담당자가 고객을 맡은 뒤 아직 업무 기록을 저장하지 않았습니다.
         </p>{/if}
       {#if customer.initial_memo}<div class="initial-memo">
-          <small>최초 메모</small>
+          <small>등록 메모</small>
           <p>{customer.initial_memo}</p>
         </div>{/if}{#if isAdmin}<div class="detail-admin-actions">
+          {#if !customer.assignee_id}<a class="btn btn-primary" href={href('assignment')}
+              >담당자 지정</a
+            >{/if}
           <Button variant="secondary" disabled={pending} onclick={() => onedit(customer)}
             >정보 수정</Button
           ><button
@@ -242,7 +280,7 @@
             onclick={() => (deleting = true)}>고객 삭제</button
           >
         </div>{/if}{#if deleting}<div class="alert warning">
-          <p>이 고객을 목록에서 삭제할까요? 업무 이력은 보존됩니다.</p>
+          <p>이 고객을 삭제할까요? 고객 목록에서 숨겨지며, 기존 업무 기록은 남아 있습니다.</p>
           <div class="inline-actions">
             <Button variant="secondary" onclick={() => (deleting = false)}>취소</Button><Button
               variant="danger"
@@ -260,11 +298,12 @@
           href={href('timeline')}
           aria-current={tab === 'timeline' ? 'page' : undefined}
           class:active={tab === 'timeline'}
-          >전체 타임라인 <span>{customer.timeline?.length || 0}</span></a
+          >전체 기록 <span>{customer.timeline?.length || 0}</span></a
         >{#if isAdmin}<a
             href={href('assignment')}
             aria-current={tab === 'assignment' ? 'page' : undefined}
-            class:active={tab === 'assignment'}>담당자 변경</a
+            class:active={tab === 'assignment'}
+            >{customer.assignee_id ? '담당자 변경' : '담당자 지정'}</a
           >{/if}
       </nav>
       {#if error}<div class="alert error" role="alert">
@@ -298,27 +337,79 @@
             onsubmit={save}
           >
             <fieldset disabled={pending || conflict}>
-              <h3>어떤 업무를 진행하셨나요?</h3>
+              <h3>연락 결과나 메모를 남겨 주세요</h3>
               <div class="activity-options">
                 {#each Object.entries(activities) as [key, label]}<button
                     type="button"
                     class:chosen={activity === key}
                     aria-pressed={activity === key}
                     onclick={() => {
-                      activity = key;
-                      dirty = true;
+                      chooseActivity(key);
                     }}>{label}</button
                   >{/each}
               </div>
               {#if activity === 'KAKAO_SENT'}<p class="field-hint">
-                  외부에서 전달한 카카오톡을 수동 기록합니다.
-                </p>{/if}<Field label="현재 상태"
-                ><select bind:value={status}
+                  이 버튼으로 카카오톡이 전송되지는 않습니다. 카카오톡에서 직접 보낸 내용을 기록해
+                  주세요.
+                </p>{/if}
+              <div class="inline-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onclick={() => {
+                    activity = 'CALL_CONNECTED';
+                    status = 'CALLBACK';
+                    manualStatus = true;
+                    dirty = true;
+                    suggestion = '';
+                  }}>재통화 예약</Button
+                >
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onclick={() => {
+                    activity = 'CONSULTATION';
+                    status = 'COMPLETED';
+                    manualStatus = true;
+                    dirty = true;
+                    suggestion = '';
+                  }}>상담 완료 선택</Button
+                >
+              </div>
+              {#if suggestion}<p class="field-hint" role="status">{suggestion}</p>{/if}
+              <Field label="상담 상태"
+                ><select
+                  bind:value={status}
+                  onchange={() => {
+                    manualStatus = true;
+                    suggestion = '';
+                  }}
                   >{#each Object.entries(statuses) as [key, label]}<option value={key}
                       >{label}</option
                     >{/each}</select
                 ></Field
-              >{#if status === 'CALLBACK'}<Field label="재통화 일시 * (한국 표준시)"
+              >{#if status === 'CALLBACK'}
+                <div class="inline-actions">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onclick={() => {
+                      callback = localInput(new Date(Date.now() + 3600000).toISOString());
+                      dirty = true;
+                    }}>1시간 후</Button
+                  >
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onclick={() => {
+                      callback =
+                        localInput(new Date(Date.now() + 86400000).toISOString()).slice(0, 10) +
+                        'T10:00';
+                      dirty = true;
+                    }}>내일 오전 10시</Button
+                  >
+                </div>
+                <Field label="재통화 일시 * (한국 시간)"
                   ><input type="datetime-local" bind:value={callback} required /></Field
                 >{/if}<Field label="업무 메모"
                 ><textarea
@@ -332,14 +423,20 @@
                 <Button type="submit" disabled={pending}
                   ><Icon name="check" size={17} />{pending ? '저장 중…' : '업무 기록 저장'}</Button
                 >
+                {#if !isAdmin}<Button
+                    type="submit"
+                    value="next"
+                    variant="secondary"
+                    disabled={pending}>저장하고 다음 고객</Button
+                  >{/if}
                 <Button type="submit" value="return" variant="secondary" disabled={pending}
                   >저장 후 목록으로</Button
                 >
               </div>
             </fieldset>
           </form>
-          <section class="consultation-history" aria-label="이전 상담 및 배분 이력">
-            <h3>이전 상담 및 배분 이력</h3>
+          <section class="consultation-history" aria-label="이전 상담 및 배정 이력">
+            <h3>이전 상담 및 배정 이력</h3>
             {@render history(customer)}
           </section>
         </div>{:else if tab === 'assignment'}<form
@@ -352,18 +449,19 @@
           <fieldset disabled={pending || usersLoading || !!usersError}>
             {#if usersLoading}<AsyncState
                 loading
-                message="직원 목록을 불러오고 있어요…"
+                message="직원 목록을 불러오는 중…"
               />{:else if usersError}<AsyncState
                 message={usersError}
                 retry={retryUsers}
               />{:else if !users.some((u) => u.status === 'ACTIVE' && u.role === 'USER')}<p
                 class="alert warning"
               >
-                변경 가능한 직원이 없습니다.
+                담당자로 지정할 직원이 없습니다. 직원 관리에서 사용 가능한 직원 계정을 확인해
+                주세요.
               </p>{/if}
             <p class="field-hint">
-              재배분해도 상담 상태·재통화 일정·기존 기록은 유지됩니다. 이전 담당자는 더 이상 조회할
-              수 없습니다.
+              담당자를 바꿔도 상담 상태·재통화 일정·기존 기록은 유지됩니다. 이전 담당자는 이 고객을
+              더 이상 볼 수 없습니다.
             </p>
             <Field label="새 담당자"
               ><select bind:value={assignee} required
@@ -378,7 +476,7 @@
             ><Button
               type="submit"
               disabled={pending || !assignee || assignee === customer.assignee_id}
-              >{pending ? '변경 중…' : '담당자 변경'}</Button
+              >{pending ? '저장 중…' : customer.assignee_id ? '담당자 변경' : '담당자 지정'}</Button
             >
           </fieldset>
         </form>{:else}{@render history(customer)}{/if}

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, body, type User, type Dashboard } from '@leadflow/api-client';
-  import { Badge, Button, Field, Icon, EmptyState, AsyncState } from '@leadflow/ui';
+  import { Badge, Button, Field, Icon, EmptyState, AsyncState, TableCellLink } from '@leadflow/ui';
   import { useNavigation, protectChanges } from './navigation.svelte';
   const navigation = useNavigation();
   let {
@@ -26,12 +26,20 @@
     retryStats: () => void;
     stats: Dashboard['staff'];
     onrefresh: () => Promise<void>;
-    onsaved: () => Promise<void>;
+    onsaved: (user: User, created: boolean) => Promise<void>;
   } = $props();
   const editing = $derived(
     memberId === 'new' ? 'new' : users.find((user) => user.id === memberId) || null,
   );
   let dirty = $state(false);
+  let showPassword = $state(false);
+  function generatePassword() {
+    password = Array.from(crypto.getRandomValues(new Uint8Array(12)), (byte) =>
+      byte.toString(16).padStart(2, '0'),
+    ).join('');
+    showPassword = true;
+    dirty = true;
+  }
   protectChanges(() => (pending ? 'pending' : dirty ? 'dirty' : null));
   let name = $state(''),
     loginId = $state(''),
@@ -58,7 +66,8 @@
     pending = true;
     error = '';
     try {
-      await api(
+      const created = editing === 'new';
+      const saved = await api<User>(
         editing === 'new' ? '/users' : `/users/${(editing as User).id}`,
         body(editing === 'new' ? 'POST' : 'PATCH', {
           name,
@@ -72,7 +81,7 @@
       dirty = false;
       password = '';
       await onrefresh();
-      await onsaved();
+      await onsaved(saved, created);
     } catch (e) {
       error = (e as Error).message;
     } finally {
@@ -81,7 +90,7 @@
   }
 </script>
 
-{#if loading}<AsyncState loading message="직원 목록을 불러오고 있어요…" />
+{#if loading}<AsyncState loading message="직원 목록을 불러오는 중…" />
 {:else if loadError}<AsyncState message={loadError} {retry} />
 {:else if memberId && !editing}<EmptyState
     title="직원을 찾을 수 없습니다"
@@ -91,8 +100,8 @@
   <section class="panel">
     <div class="section-heading">
       <div>
-        <h2>팀 구성원 <span class="count-chip">{users.length}</span></h2>
-        <p>직원 계정을 만들고 로그인 ID와 초기 비밀번호를 직원에게 전달하세요.</p>
+        <h2>직원 목록 <span class="count-chip">{users.length}</span></h2>
+        <p>직원 계정을 만들고 로그인 아이디와 초기 비밀번호를 직원에게 전달하세요.</p>
       </div>
       <a class="btn btn-primary" href="/team/new"><Icon name="plus" size={17} />직원 등록</a>
     </div>
@@ -107,40 +116,55 @@
         <table>
           <thead
             ><tr
-              ><th>이름 / 계정</th><th>권한</th><th>재직 상태</th><th>담당 고객</th><th
+              ><th>이름 / 계정</th><th>권한</th><th>직원 상태</th><th>담당 고객</th><th
                 >상담 완료</th
               ><th>재통화 예정</th><th></th></tr
             ></thead
           ><tbody
-            >{#each users as user (user.id)}{@const stat = stats.find((s) => s.id === user.id)}<tr
-                ><td
-                  ><div class="customer-name">
-                    <span class="avatar">{user.name.slice(0, 1)}</span><span
-                      ><strong>{user.name}</strong><small>{user.login_id}</small></span
-                    >
-                  </div></td
-                ><td>{user.role === 'ADMIN' ? '관리자' : '직원'}</td><td
-                  ><Badge tone={user.status === 'ACTIVE' ? 'COMPLETED' : 'HOLD'}
+            >{#each users as user (user.id)}
+              {@const stat = stats.find((s) => s.id === user.id)}
+              {@const workHref = `/team/${user.id}/work`}
+              <tr>
+                <TableCellLink
+                  href={workHref}
+                  label={`${user.name} 업무 상세`}
+                  id={`member-work-${user.id}`}
+                  primary
+                >
+                  <div class="customer-name">
+                    <span class="avatar">{user.name.slice(0, 1)}</span>
+                    <span><strong>{user.name}</strong><small>{user.login_id}</small></span>
+                  </div>
+                </TableCellLink>
+                <TableCellLink href={workHref} label={`${user.name} 업무 상세 · 권한`}
+                  >{user.role === 'ADMIN' ? '관리자' : '직원'}</TableCellLink
+                >
+                <TableCellLink href={workHref} label={`${user.name} 업무 상세 · 직원 상태`}>
+                  <Badge tone={user.status === 'ACTIVE' ? 'COMPLETED' : 'HOLD'}
                     >{user.status === 'ACTIVE'
                       ? '재직'
                       : user.status === 'INACTIVE'
-                        ? '비활성'
+                        ? '이용 중지'
                         : '퇴사'}</Badge
-                  ></td
-                ><td
-                  ><a href={`/team/${user.id}/work`}
-                    >{statsLoading || statsError ? '—' : stat?.total || 0}명</a
-                  ></td
-                ><td>{statsLoading || statsError ? '—' : stat?.completed || 0}명</td><td
-                  >{statsLoading || statsError ? '—' : stat?.callback || 0}명</td
-                ><td
-                  ><a class="btn btn-ghost" href={`/team/${user.id}/work`}>업무 상세</a><a
-                    class="btn btn-ghost"
-                    id={`member-${user.id}`}
-                    href={`/team/${user.id}`}>계정 관리</a
-                  ></td
-                ></tr
-              >{/each}</tbody
+                  >
+                </TableCellLink>
+                <TableCellLink href={workHref} label={`${user.name} 업무 상세 · 담당 고객`}
+                  >{statsLoading || statsError ? '—' : stat?.total || 0}명</TableCellLink
+                >
+                <TableCellLink href={workHref} label={`${user.name} 업무 상세 · 상담 완료`}
+                  >{statsLoading || statsError ? '—' : stat?.completed || 0}명</TableCellLink
+                >
+                <TableCellLink href={workHref} label={`${user.name} 업무 상세 · 재통화 예정`}
+                  >{statsLoading || statsError ? '—' : stat?.callback || 0}명</TableCellLink
+                >
+                <td>
+                  <a class="btn btn-ghost" href={workHref}>업무 상세</a>
+                  <a class="btn btn-ghost" id={`member-${user.id}`} href={`/team/${user.id}`}
+                    >계정 관리</a
+                  >
+                </td>
+              </tr>
+            {/each}</tbody
           >
         </table>
       </div>{/if}
@@ -150,7 +174,6 @@
   <section class="panel editor-page" aria-label="직원 계정 관리">
     <div class="modal-heading">
       <div>
-        <span class="eyebrow">TEAM MEMBER</span>
         <h2>{editing === 'new' ? '새 직원 등록' : '직원 계정 관리'}</h2>
       </div>
       <button
@@ -169,7 +192,7 @@
       <fieldset disabled={pending}>
         <div class="form-grid">
           <Field label="이름 *"><input bind:value={name} required maxlength="100" /></Field><Field
-            label="로그인 ID *"
+            label="로그인 아이디 *"
             ><input
               bind:value={loginId}
               disabled={editing !== 'new'}
@@ -182,28 +205,38 @@
             label={editing === 'new' ? '초기 비밀번호 *' : '새 비밀번호'}
             hint={editing === 'new'
               ? '12자 이상으로 입력하세요.'
-              : '분실 시 새 비밀번호를 입력하세요. 저장하면 기존 로그인 세션이 종료됩니다. 비워 두면 기존 비밀번호를 유지합니다.'}
+              : '비밀번호를 바꿀 때만 입력하세요. 변경하면 해당 직원이 모든 기기에서 로그아웃됩니다.'}
             ><input
-              type="password"
+              type={showPassword ? 'text' : 'password'}
+              aria-label={editing === 'new' ? '초기 비밀번호 *' : '새 비밀번호'}
               bind:value={password}
               required={editing === 'new'}
               minlength="12"
               autocomplete="new-password"
             /></Field
-          ><Field label="연락처"><input type="tel" bind:value={phone} /></Field><Field label="권한"
+          >
+          <div class="inline-actions">
+            <Button type="button" variant="secondary" onclick={generatePassword}
+              >비밀번호 자동 생성</Button
+            >
+            <Button type="button" variant="ghost" onclick={() => (showPassword = !showPassword)}
+              >{showPassword ? '비밀번호 숨기기' : '비밀번호 보기'}</Button
+            >
+          </div>
+          <Field label="연락처"><input type="tel" bind:value={phone} /></Field><Field label="권한"
             ><select bind:value={role}
               ><option value="USER">직원</option><option value="ADMIN">관리자</option></select
             ></Field
-          ><Field label="재직 상태"
+          ><Field label="직원 상태"
             ><select bind:value={status}
-              ><option value="ACTIVE">재직</option><option value="INACTIVE">비활성</option><option
-                value="DEPARTED">퇴사</option
-              ></select
+              ><option value="ACTIVE">재직</option><option value="INACTIVE">이용 중지</option
+              ><option value="DEPARTED">퇴사</option></select
             ></Field
           >
         </div>
         <p class="field-hint">
-          비활성·퇴사 계정은 로그인과 신규 배분이 제한됩니다. 기존 업무 기록은 유지됩니다.
+          이용 중지 또는 퇴사로 변경하면 모든 기기에서 로그아웃되며, 로그인하거나 새 고객을 배정받을
+          수 없습니다. 기존 업무 기록은 남습니다.
         </p>
         {#if error}<p class="alert error" role="alert">{error}</p>{/if}
         <div class="modal-actions">
@@ -212,7 +245,9 @@
             variant="secondary"
             disabled={pending}
             onclick={() => navigation.go('/team')}>취소</Button
-          ><Button type="submit" disabled={pending}>{pending ? '저장 중…' : '저장하기'}</Button>
+          ><Button type="submit" disabled={pending}
+            >{pending ? '저장 중…' : editing === 'new' ? '직원 등록' : '변경 사항 저장'}</Button
+          >
         </div>
       </fieldset>
     </form>
