@@ -222,11 +222,21 @@ test('직원 정보 셀 전체에서 상세로 이동하고 상세 여백과 모
   await expect(page.getByRole('heading', { name: '직원 업무 상세', exact: true })).toBeFocused();
   const profile = page.getByRole('region', { name: '직원 기본 정보' });
   const summary = page.getByRole('region', { name: '직원 업무 요약' });
-  const profileBox = await profile.boundingBox();
-  const summaryBox = await summary.boundingBox();
-  expect(summaryBox!.y - profileBox!.y - profileBox!.height).toBeGreaterThanOrEqual(23);
-  const info = await profile.locator('dl').boundingBox();
-  expect(info!.x - profileBox!.x).toBeGreaterThanOrEqual(24);
+  await expect(profile).toBeVisible();
+  await expect(summary).toBeVisible();
+  // Read all rectangles in one browser task so the page entrance animation
+  // cannot move their shared ancestor between measurements.
+  const spacing = await profile.or(summary).evaluateAll(([profile, summary]) => {
+    const profileBox = profile.getBoundingClientRect();
+    const summaryBox = summary.getBoundingClientRect();
+    const info = profile.querySelector('dl')!.getBoundingClientRect();
+    return {
+      gap: summaryBox.top - profileBox.bottom,
+      padding: info.left - profileBox.left,
+    };
+  });
+  expect(spacing.gap).toBeGreaterThanOrEqual(23);
+  expect(spacing.padding).toBeGreaterThanOrEqual(24);
   await page.screenshot({ path: testInfo.outputPath('staff-detail-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByLabel('담당 고객 검색')).toBeVisible();
